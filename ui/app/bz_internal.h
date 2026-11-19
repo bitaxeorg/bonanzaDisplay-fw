@@ -21,6 +21,8 @@ typedef struct {
     bz_data_t data;
     bz_settings_t settings;
     uint32_t now;          // Time of the current tick
+    const char *version;   // Firmware version and build id, or NULL
+    const char *build;
     bz_stat_t stats[BZ_M_COUNT];
 } bz_state_t;
 

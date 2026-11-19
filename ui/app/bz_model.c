@@ -137,15 +137,21 @@ void bz_metric_read(bz_metric_t metric, const bz_data_t *d, bz_reading_t *out) {
 
 // ---- Settings -----------------------------------------------------------------
 
+// The blob stores four rows of slots. The fourth belonged to a page that has
+// since been removed; keeping the layout lets settings saved by earlier
+// firmware load unchanged.
 #define BLOB_VERSION 1u
-#define BLOB_PAYLOAD (3u + BZ_PAGE_COUNT * BZ_MAX_SLOTS)
+#define BLOB_PAGE_ROWS 4u
+#define BLOB_PAYLOAD (3u + BLOB_PAGE_ROWS * BZ_MAX_SLOTS)
+
+_Static_assert(BZ_PAGE_COUNT < BLOB_PAGE_ROWS, "settings blob has no room for another page");
 
 int bz_page_slot_count(bz_page_t page) {
     return page == BZ_PAGE_HERO ? 5 : page == BZ_PAGE_GRID ? 6 : page == BZ_PAGE_DUO ? 2 : 0;
 }
 
 const char *bz_page_name(bz_page_t page) {
-    static const char *const names[BZ_PAGE_COUNT] = {"HERO", "GRID", "DUO", "STUDIO"};
+    static const char *const names[BZ_PAGE_COUNT] = {"HERO", "GRID", "DUO"};
     return page < BZ_PAGE_COUNT ? names[page] : "?";
 }
 
@@ -194,7 +200,7 @@ void bz_settings_encode(const bz_settings_t *s, uint8_t blob[BZ_SETTINGS_BLOB_SI
     blob[6] = s->page;
     blob[7] = s->digits;
     blob[8] = s->brightness;
-    memcpy(&blob[9], s->slots, BZ_PAGE_COUNT * BZ_MAX_SLOTS);
+    memcpy(&blob[9], s->slots, sizeof(s->slots));
     uint32_t crc = crc32(blob, BZ_SETTINGS_BLOB_SIZE - 4);
     for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
 }
@@ -206,7 +212,8 @@ bool bz_settings_decode(const uint8_t blob[BZ_SETTINGS_BLOB_SIZE], bz_settings_t
     s.page = blob[6];
     s.digits = blob[7];
     s.brightness = blob[8];
-    memcpy(s.slots, &blob[9], BZ_PAGE_COUNT * BZ_MAX_SLOTS);
+    memcpy(s.slots, &blob[9], sizeof(s.slots));
+    if (s.page == BLOB_PAGE_ROWS - 1u) s.page = BZ_PAGE_HERO; // Was on the removed page
     if (s.page >= BZ_PAGE_COUNT || s.digits >= BZ_DIGITS_COUNT ||
         s.brightness >= BZ_BRIGHTNESS_LEVELS) return false;
     for (int page = 0; page < BZ_PAGE_COUNT; ++page)

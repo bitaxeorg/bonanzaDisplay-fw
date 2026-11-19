@@ -109,6 +109,8 @@ void bz_app_init(const bz_platform_t *platform, uint32_t now_ms) {
     apply_brightness();
     app.next_stat = now_ms + STAT_PERIOD_MS;
     app.last_input = now_ms;
+    bz.version = platform ? platform->version : NULL;
+    bz.build = platform ? platform->build : NULL;
     bz_boot_enter(true);
     app.started = true;
     memset(app.shadow, 0xff, sizeof(app.shadow)); // Force the first frame out
@@ -225,11 +227,6 @@ bool bz_app_tick(uint32_t now_ms) {
 
 bz_mode_t bz_app_mode(void) {
     return app.menu_open ? BZ_MODE_MENU : app.base_mining ? BZ_MODE_MINING : BZ_MODE_BOOT;
-}
-
-bool bz_app_shows_studio(void) {
-    return !app.menu_open && app.base_mining && bz.settings.page == BZ_PAGE_STUDIO &&
-           !app.toast_on;
 }
 
 const bz_settings_t *bz_app_settings(void) {

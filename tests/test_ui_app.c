@@ -32,7 +32,7 @@ static void set_brightness(uint8_t level) {
     last_brightness = level;
 }
 
-static const bz_platform_t platform = {load, save, set_brightness};
+static const bz_platform_t platform = {load, save, set_brightness, "9.8.7", "abc1234"};
 
 static void run(uint32_t ms) {
     for (uint32_t end = now + ms; (int32_t)(end - now) > 0;) {
@@ -139,6 +139,16 @@ static void test_metric_formatting(void) {
     assert(!r.valid);
 }
 
+// Standard CRC-32, written independently of the one in bz_model.c.
+static uint32_t crc32_of(const uint8_t *data, size_t size) {
+    uint32_t crc = 0xffffffffu;
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) crc = crc & 1u ? (crc >> 1) ^ 0xedb88320u : crc >> 1;
+    }
+    return ~crc;
+}
+
 static void test_settings_blob(void) {
     bz_settings_t a, b;
     uint8_t blob[BZ_SETTINGS_BLOB_SIZE];
@@ -165,6 +175,22 @@ static void test_settings_blob(void) {
     bz_settings_encode(&a, bad);
     assert(!bz_settings_decode(bad, &b));
     assert(!memcmp(&untouched, &b, sizeof(b)));
+
+    // Settings saved by firmware that still had a fourth (STUDIO) page load
+    // unchanged, landing on HERO if that page was the one selected.
+    a.slots[BZ_PAGE_HERO][0] = BZ_M_POOL;
+    bz_settings_encode(&a, blob);
+    blob[6] = 3;                     // Selected page: the removed one
+    memset(&blob[9 + 3 * 6], 1, 6);  // Its slot row, as that firmware wrote it
+    uint32_t crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
+    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
+    assert(bz_settings_decode(blob, &b));
+    assert(b.page == BZ_PAGE_HERO && b.slots[BZ_PAGE_HERO][0] == BZ_M_POOL);
+    assert(b.slots[BZ_PAGE_DUO][1] == BZ_M_POOL && b.digits == BZ_DIGITS_DOT_MATRIX);
+    blob[6] = 4; // Never a valid page
+    crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
+    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
+    assert(!bz_settings_decode(blob, &b));
 }
 
 static void test_boot_then_mining(void) {
@@ -293,21 +319,27 @@ static void test_menu_other_settings(void) {
     click();
     assert(s->brightness == 1 && last_brightness == 1);
 
-    // STUDIO has no slots, so METRICS does nothing there.
+    // Each page has its own slots: DUO offers two.
     turn(-3);
     click();
-    turn(3);
+    turn(3);   // Stops on the last page
     click();
-    assert(s->page == BZ_PAGE_STUDIO);
+    assert(s->page == BZ_PAGE_DUO);
     turn(1);
+    click();   // METRICS
+    turn(10);  // < BACK, LEFT, RIGHT: stops on RIGHT
     click();
-    assert(bz_app_mode() == BZ_MODE_MENU && !bz_app_shows_studio());
+    turn(-100);
+    click();
+    assert(s->slots[BZ_PAGE_DUO][1] == BZ_M_HASHRATE);
+    assert(s->slots[BZ_PAGE_HERO][1] == BZ_M_CHIP_TEMP); // Other pages untouched
+    hold();    // Back to SETUP
 
     // RESET ALL asks first.
     turn(3);
     click();
     click(); // NO, KEEP
-    assert(s->page == BZ_PAGE_STUDIO && s->digits == BZ_DIGITS_DOT_MATRIX);
+    assert(s->page == BZ_PAGE_DUO && s->digits == BZ_DIGITS_DOT_MATRIX);
     click();
     turn(1);
     click(); // YES, RESET
@@ -337,14 +369,10 @@ static void test_page_flip(void) {
     const bz_settings_t *s = bz_app_settings();
     turn(1);
     assert(s->page == BZ_PAGE_GRID);
-    turn(2);
-    assert(s->page == BZ_PAGE_STUDIO && !bz_app_shows_studio()); // Page tag first
-    run(1500);
-    assert(bz_app_shows_studio());
     turn(1);
-    assert(s->page == BZ_PAGE_HERO && !bz_app_shows_studio());
-    turn(-1);
-    assert(s->page == BZ_PAGE_STUDIO);
+    assert(s->page == BZ_PAGE_DUO);
+    turn(1);
+    assert(s->page == BZ_PAGE_HERO); // Wraps around
     turn(-1);
     assert(s->page == BZ_PAGE_DUO);
     assert(saves == 0); // Several quick flips...

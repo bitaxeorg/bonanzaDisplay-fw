@@ -56,7 +56,16 @@ static void sim_brightness(uint8_t level) {
     brightness = level;
 }
 
-static const bz_platform_t platform = {sim_load, sim_save, sim_brightness};
+// tools/sim.sh passes the same version and build id as the firmware build.
+#ifndef BONANZA_FW_VERSION
+#define BONANZA_FW_VERSION "0.0.0"
+#endif
+#ifndef BONANZA_FW_BUILD
+#define BONANZA_FW_BUILD "sim"
+#endif
+
+static const bz_platform_t platform = {sim_load, sim_save, sim_brightness, BONANZA_FW_VERSION,
+                                       BONANZA_FW_BUILD};
 
 // ---- Pretend host -----------------------------------------------------------------
 
@@ -97,10 +106,10 @@ static bool host_has_wifi(void) {
 }
 
 static double host_hashrate(void) {
-    if (host_mode == HOST_UP) return 1210.0 + jitter(60);
+    if (host_mode == HOST_UP) return 3000.0 + jitter(120);
     if (host_mode != HOST_BOOT || host_age() < 5000) return 0;
     double ramp = (double)(host_age() - 5000) / 4000.0;
-    return (ramp > 1 ? 1 : ramp) * 1210.0 + jitter(40);
+    return (ramp > 1 ? 1 : ramp) * 3000.0 + jitter(80);
 }
 
 static void host_telemetry(void) {
@@ -108,9 +117,9 @@ static void host_telemetry(void) {
     host_sendf("hashrate", "%.2f", hashrate < 0 ? 0 : hashrate);
     host_sendf("chipTemp", "%f", 58.25 + jitter(1.5));
     host_sendf("vrTemp", "%f", 47.0 + jitter(1));
-    host_sendf("power", "%.2f", hashrate > 0 ? 17.6 + jitter(0.4) : 2.1);
-    host_sendf("voltage", "%.2f", 5020 + jitter(15));
-    host_sendf("current", "%.2f", hashrate > 0 ? 3506 + jitter(60) : 420);
+    host_sendf("power", "%.2f", hashrate > 0 ? 55.0 + jitter(1.2) : 6.2);
+    host_sendf("voltage", "%.2f", 12010 + jitter(25));
+    host_sendf("current", "%.2f", hashrate > 0 ? 4580 + jitter(90) : 515);
     host_sendf("fan_speed", "%.0f", 4200 + jitter(80));
     host_send("RES", "best_difficulty", "4.29G");
     char shares[32];
@@ -135,7 +144,7 @@ static void host_receive(const char *sentence) {
     }
     if (strstr(sentence, "REQ,systemInfo")) {
         host_send("RES", "deviceModel", "Bonanza");
-        host_send("RES", "asicModel", "BM1370");
+        host_send("RES", "asicModel", "BZM");
         host_send("RES", "pool", "public-pool.io");
         host_send("RES", "poolPort", "21496");
         host_send("RES", "poolUser", "bc1qexample.bonanza");
@@ -354,9 +363,9 @@ int main(int argc, char **argv) {
             if (strcmp(arg + 7, mode_name())) return fail(arg, mode_name());
         } else if (!strcmp(arg, "status")) {
             const bz_settings_t *s = bz_app_settings();
-            printf("t=%lu mode=%s page=%s digits=%d brightness=%d applied=%d saves=%u studio=%d slots=",
+            printf("t=%lu mode=%s page=%s digits=%d brightness=%d applied=%d saves=%u slots=",
                    (unsigned long)now_ms, mode_name(), bz_page_name((bz_page_t)s->page), s->digits,
-                   s->brightness, brightness, save_count, bz_app_shows_studio());
+                   s->brightness, brightness, save_count);
             for (int j = 0; j < bz_page_slot_count((bz_page_t)s->page); ++j)
                 printf("%s%s", j ? "," : "", bz_metric_name((bz_metric_t)s->slots[s->page][j]));
             printf("\n");

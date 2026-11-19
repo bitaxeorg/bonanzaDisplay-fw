@@ -1,7 +1,6 @@
 // Host test of the LVGL glue: what LVGL flushes to the panel must be exactly
-// the retro UI's framebuffer, and the STUDIO page must hand the display to the
-// LVGL Editor screen and back. Uses the firmware's lv_conf.h and an L8,
-// full-refresh display like lv_port_disp.c.
+// the UI's framebuffer, on every screen. Uses the firmware's lv_conf.h and an
+// L8, full-refresh display like lv_port_disp.c.
 
 #include "bonanza_ui.h"
 
@@ -83,8 +82,6 @@ int main(void) {
     data.power_mw = 17600;
     data.fan_rpm = 4200;
     bonanza_ui_set_data(&data);
-    bonanza_ui_set_metrics(data.family, data.asic, "BAP connected", data.ip, "4.29G",
-                           1210, 58, 18, UINT32_MAX, 4200);
     run(6000, 0);
     assert(bz_app_mode() == BZ_MODE_MINING && panel_matches_framebuffer());
 
@@ -104,28 +101,15 @@ int main(void) {
     run(200, 0);
     assert(bz_app_mode() == BZ_MODE_MINING);
 
-    // Three clicks of the dial: HERO -> GRID -> DUO -> STUDIO.
-    lv_obj_t *retro = lv_screen_active();
-    uint8_t retro_panel[BZ_W * BZ_H];
-    memcpy(retro_panel, panel, sizeof(panel));
-    run(50, 1);
-    run(50, 1);
-    run(50, 1);
-    assert(bz_app_settings()->page == BZ_PAGE_STUDIO);
-    run(2500, 0);
-    assert(bz_app_shows_studio() && lv_screen_active() != retro);
-    assert(lit(panel) > 500 && !panel_matches_framebuffer());
-    FILE *f = fopen("studio.pgm", "wb"); // For a visual check of the editor screen
-    if (f) {
-        fprintf(f, "P5\n%d %d\n255\n", BZ_W, BZ_H);
-        fwrite(panel, 1, sizeof(panel), f);
-        fclose(f);
+    // Flip through every mining page with the dial and back to the first.
+    for (int flip = 0; flip < BZ_PAGE_COUNT; ++flip) {
+        uint8_t before_flip[BZ_W * BZ_H];
+        memcpy(before_flip, panel, sizeof(panel));
+        run(2500, 1);
+        assert(panel_matches_framebuffer() && lit(panel) > 500);
+        assert(memcmp(before_flip, panel, sizeof(panel)));
     }
-
-    // One more click wraps to HERO: the retro screen is back and correct.
-    run(2500, 1);
-    assert(!bz_app_shows_studio() && lv_screen_active() == retro);
-    assert(panel_matches_framebuffer() && lit(panel) > 500);
+    assert(bz_app_settings()->page == BZ_PAGE_HERO);
 
     puts("UI LVGL glue test passed");
     return 0;

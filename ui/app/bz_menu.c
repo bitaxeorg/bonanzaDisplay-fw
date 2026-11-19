@@ -107,7 +107,7 @@ static void item_text(int index, char *label, size_t label_size, char *value, si
             break;
         case ROOT_METRICS:
             snprintf(label, label_size, "METRICS");
-            snprintf(value, value_size, bz_page_slot_count(mining_page()) ? ">" : "N/A");
+            snprintf(value, value_size, ">");
             break;
         case ROOT_DIGITS:
             snprintf(label, label_size, "BIG DIGITS");
@@ -151,9 +151,7 @@ static bool select_item(void) {
         m.root_cursor = m.cursor;
         switch (m.cursor) {
         case ROOT_LAYOUT: go(PAGE_LAYOUT, 0); break;
-        case ROOT_METRICS:
-            if (bz_page_slot_count(mining_page())) go(PAGE_METRICS, 1);
-            break;
+        case ROOT_METRICS: go(PAGE_METRICS, 1); break;
         case ROOT_DIGITS: go(PAGE_DIGITS, 0); break;
         case ROOT_BRIGHTNESS: go(PAGE_BRIGHTNESS, 0); break;
         case ROOT_RESET: go(PAGE_RESET, 0); break;

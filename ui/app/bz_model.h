@@ -88,7 +88,6 @@ typedef enum {
     BZ_PAGE_HERO,   // One big metric with a bar meter, four side metrics
     BZ_PAGE_GRID,   // Six equal metrics
     BZ_PAGE_DUO,    // Two big metrics
-    BZ_PAGE_STUDIO, // The LVGL Editor / Pixel Studio screen (main_screen.xml)
     BZ_PAGE_COUNT
 } bz_page_t;
 

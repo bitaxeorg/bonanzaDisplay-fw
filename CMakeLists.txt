@@ -3,7 +3,22 @@ cmake_minimum_required(VERSION 3.13)
 # Pull in Pico SDK (must be before project())
 include(pico_sdk_import.cmake)
 
-project(bonanzaDisplay C CXX ASM)
+# The firmware version lives in the VERSION file; the build id is the git
+# revision at configure time (re-run cmake after committing to refresh it).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" BONANZA_FW_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+execute_process(
+    COMMAND git describe --always --dirty --abbrev=7 --exclude=*
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE BONANZA_FW_BUILD
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT BONANZA_FW_BUILD)
+    set(BONANZA_FW_BUILD "unknown")
+endif()
+
+project(bonanzaDisplay VERSION ${BONANZA_FW_VERSION} LANGUAGES C CXX ASM)
+message(STATUS "bonanzaDisplay firmware ${BONANZA_FW_VERSION} (${BONANZA_FW_BUILD})")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -78,6 +93,12 @@ target_link_libraries(${PROJECT_NAME}
 if(BONANZA_DISPLAY_BRINGUP_TEST)
     target_compile_definitions(${PROJECT_NAME} PRIVATE BONANZA_DISPLAY_BRINGUP_TEST=1)
 endif()
+
+# Shown on the loading screen and by `picotool info`.
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    BONANZA_FW_VERSION="${BONANZA_FW_VERSION}"
+    BONANZA_FW_BUILD="${BONANZA_FW_BUILD}")
+pico_set_program_version(${PROJECT_NAME} "${BONANZA_FW_VERSION} (${BONANZA_FW_BUILD})")
 
 # USB-only printf debugging; UART1 is reserved for BAP
 pico_enable_stdio_usb(${PROJECT_NAME} 1)

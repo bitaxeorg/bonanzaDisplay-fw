@@ -293,13 +293,7 @@ void bz_mining_draw(void) {
     switch (bz.settings.page) {
     case BZ_PAGE_HERO: draw_hero(slots); break;
     case BZ_PAGE_GRID: draw_grid(slots); break;
-    case BZ_PAGE_DUO: draw_duo(slots); break;
-    default:
-        // The LVGL Editor screen replaces this framebuffer; this is only seen
-        // for a moment while the page tag is up.
-        bz_bitmap((BZ_W - bz_logo_w) / 2, 8, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_DIM);
-        bz_text_center(BZ_W / 2, 46, "LVGL EDITOR SCREEN", BZ_FONT_SMALL, BZ_MID);
-        break;
+    default: draw_duo(slots); break;
     }
 }
 
@@ -314,12 +308,6 @@ void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on) {
     bz_page_t page = (bz_page_t)bz.settings.page;
     const uint8_t (*cells)[4] = page == BZ_PAGE_HERO ? hero : page == BZ_PAGE_GRID ? grid : duo;
     int count = bz_page_slot_count(page);
-    if (count == 0) {
-        bz_dotted_rect(x, y, 121, 33, BZ_MID);
-        bz_text_center(x + 60, y + 8, "LVGL EDITOR", BZ_FONT_SMALL, BZ_WHITE);
-        bz_text_center(x + 60, y + 18, "XML SCREEN", BZ_FONT_SMALL, BZ_WHITE);
-        return;
-    }
     for (int i = 0; i < count; ++i) {
         int cx = x + cells[i][0], cy = y + cells[i][1], cw = cells[i][2], ch = cells[i][3];
         bz_rect(cx, cy, cw + 1, ch + 1, BZ_MID);

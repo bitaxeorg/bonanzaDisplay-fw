@@ -10,9 +10,9 @@ the bitaxe starts up, mining pages once it is hashing, and a setup menu,
 driven by the dial switch, that chooses which metrics the mining pages show.
 See [Using the display](#using-the-display).
 
-The `ui` directory is also an **LVGL Editor / LVGL Pro project**. Its XML
-defines the fonts, the logo, and one freely editable screen that appears as
-the `STUDIO` mining page; the exported C is compiled into the firmware.
+The screens are plain C in `ui/app`, drawn into a framebuffer that LVGL
+blits to the panel. The `ui` directory is also an **LVGL Editor / LVGL Pro
+project**, which is where the fonts and the Bitaxe logo come from.
 
 The display is connected through an **8080 8-bit parallel interface**. The CPU
 packs LVGL's L8 framebuffer into the SSD1322's 4bpp format, then DMA and PIO
@@ -26,7 +26,7 @@ perform the hardware-timed transfer.
 - **LVGL 9.x** rendering — L8 (8bpp) with automatic 4bpp packing
 - **Double-buffered** full-screen render mode
 - **Px437 FMTowns and Portfolio** 1bpp bitmap fonts shared with `bitaxe-lcd`
-- **Retro UI**: loading screen, four mining pages, and a dial-driven setup menu
+- **Retro UI**: loading screen, three mining pages, and a dial-driven setup menu
 - **Selectable metrics** for every slot of every mining page, saved in flash
 - **Desktop simulator** and host tests; no board needed to work on the UI
 
@@ -37,12 +37,27 @@ four times and tinted like the green panel. Each is the full 256×64 display.
 
 | Mode | When | What it shows |
 | --- | --- | --- |
-| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, enters WiFi setup, or stops responding | Bitaxe logo, a typed-out start-up log that follows the real BAP link (link, host model, WiFi address, first hashrate), and a progress meter |
-| **Mining** | While the host is connected | One of four pages of live metrics |
+| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, enters WiFi setup, or stops responding | Bitaxe logo, a typed-out start-up log that follows the real BAP link, and a checkered progress bar along the bottom |
+| **Mining** | While the host is connected | One of three pages of live metrics |
 | **Setup** | After pushing the dial | Menus on the left, a live preview of the result on the right |
 
-If the host is connected for 25 seconds without reporting any hashrate, the
-mining screen is shown anyway.
+The start-up log reads, in order:
+
+| Line | Appears when |
+| --- | --- |
+| `BONANZA DISPLAY V0.1.0` | Power-up. The number is this firmware's [version](#firmware-version) |
+| `BUILD e4cac89` | Power-up. The git revision the firmware was built from |
+| `BAP LINK 115200-8N1 ... OK` | `OK` once the host first answers; a spinner until then |
+| `HOST Bonanza BZM` | The host has reported its model and ASIC |
+| `WIFI 192.168.1.234` | The host has joined WiFi and reported its address |
+| `BZM INIT ... OK` | Shown with a spinner as soon as WiFi is up, because ESP-Miner only powers up and initialises the ASIC chain after that; `OK` when hashrate first appears |
+| `HASHING 3.00 TH/s` | First nonzero hashrate; the mining screen follows a moment later |
+
+A host restart, WiFi setup mode, or a lost link adds its own line (`HOST
+RESTARTING`, `HOST IN WIFI SETUP MODE`, `HOST LINK LOST`) and starts the
+sequence again from the link line. If the host is connected for 25 seconds
+without reporting any hashrate, the log says `NO HASHRATE YET. STANDBY` and
+the mining screen is shown anyway.
 
 | Loading | Loading, host in WiFi setup mode |
 | --- | --- |
@@ -68,7 +83,6 @@ flip, so they survive power cycles and firmware updates.
 | `HERO` | 5 | One big metric with a twin bar meter (the value now and its five-minute average, with a marker at the ten-minute peak), plus four side metrics, WiFi signal bars, and the ASIC model |
 | `GRID` | 6 | Six equal metrics, three by two |
 | `DUO` | 2 | Two big metrics, each with a bar meter |
-| `STUDIO` | — | The LVGL Editor screen from `ui/screens/main_screen.xml` |
 
 Bar meters auto-range to a round full scale above the highest value seen
 since power-up; temperatures use a fixed 0–100 scale.
@@ -81,15 +95,11 @@ since power-up; temperatures use a fixed 0–100 scale.
 | --- | --- |
 | ![GRID page](docs/screens/grid.png) | ![DUO page](docs/screens/duo.png) |
 
-The `STUDIO` page as it appeared on an earlier board:
-
-![The LVGL Editor screen on the panel](image.png)
-
 ### Setup menu
 
 ```text
 SETUP
-├── LAYOUT       HERO / GRID / DUO / STUDIO    which page is shown
+├── LAYOUT       HERO / GRID / DUO             which page is shown
 ├── METRICS      one entry per slot of that page; each opens a metric picker
 ├── BIG DIGITS   SOLID / DOT MATRIX            style of the large numbers
 ├── BRIGHTNESS   1 LOW .. 4 HIGH               panel contrast current
@@ -414,6 +424,21 @@ cmake --build build-v3-rp2354a -j
 The RP2354A has 2 MiB of internal flash; the explicit flash-size setting
 overrides the Pico 2 board profile's larger default.
 
+### Firmware version
+
+The version number is the single line in the [`VERSION`](VERSION) file. The
+build also records the git revision it was configured from (with `-dirty` if
+there were uncommitted changes). Both appear on the loading screen, at the
+start of the USB debug log, and in `picotool info`:
+
+```text
+ name:          bonanzaDisplay
+ version:       0.1.0 (e4cac89)
+```
+
+The revision is read when CMake configures the build, so re-run `cmake` after
+committing if the build id matters. Editing `VERSION` reconfigures by itself.
+
 ### Simulator
 
 The UI and the BAP client run on the desktop against a pretend ESP-Miner
@@ -464,8 +489,8 @@ All three use AddressSanitizer and UndefinedBehaviorSanitizer.
   metric in every slot of every page.
 - `test_ui_lvgl.sh` builds LVGL for the host with the firmware's `lv_conf.h`
   and checks that what LVGL flushes to the panel is exactly the UI's
-  framebuffer, including the hand-over to and from the `STUDIO` page. The
-  first run compiles LVGL and takes a minute or two.
+  framebuffer on the loading screen, every mining page, and the setup menu.
+  The first run compiles LVGL and takes a minute or two.
 
 The physical UART, panel, dial, flash storage, and brightness control still
 require a board test.
@@ -478,7 +503,12 @@ picotool load build-v3-rp2354a/bonanzaDisplay.uf2 -f && picotool reboot
 
 Or hold BOOTSEL while connecting USB, then drag `build-v3-rp2354a/bonanzaDisplay.uf2` to the mounted drive.
 
-## Edit the UI with LVGL Editor
+## Fonts and logo: the LVGL Editor project
+
+The loading screen, mining pages, and setup menu are C code in `ui/app`;
+preview them with the [simulator](#simulator). The `ui` directory is still an
+LVGL Editor project, and it is the source of the two fonts and the Bitaxe
+logo:
 
 1. Install LVGL Editor or the official VS Code extension. The project is known
    to work with extension 1.0.1; using the latest available version is
@@ -489,15 +519,9 @@ Or hold BOOTSEL while connecting USB, then drag `build-v3-rp2354a/bonanzaDisplay
 3. If the extension was already running, use **Developer: Reload Window** once.
 4. Open LVGL Editor and select the `pico2w_ssd1322` target. The preview is
    configured for the physical **256×64 L8 grayscale** display.
-5. Edit `ui/screens/main_screen.xml` in Design or XML mode.
-6. Choose **Compile and export code**, then rebuild the firmware.
-
-The screen edited here is the `STUDIO` mining page: turn the dial on the
-mining screen, or choose it under `SETUP > LAYOUT`. The loading screen, the
-other mining pages, and the setup menu are C code in `ui/app` and are not
-editable in LVGL Editor; preview those with the [simulator](#simulator).
-`ui/app/bz_assets_data.c` holds the same fonts and logo as fixed-cell bitmaps
-for that code. After changing a font or the logo in the editor, regenerate it:
+5. Change the fonts or images in `globals.xml`, then choose **Compile and
+   export code**.
+6. Regenerate the fixed-cell copies that `ui/app` draws with, and rebuild:
 
 ```bash
 python3 tools/gen_ui_assets.py
@@ -515,26 +539,10 @@ Files ending in `_gen.c` or `_gen.h`, plus `file_list_gen.cmake`, are owned by
 LVGL Editor and may be overwritten. Put persistent C code in `bonanza_ui.c`,
 `bonanza_ui.h`, or add extra sources in `user_config.cmake`.
 
-The editor screen is adapted from `bitaxe-lcd` for the 256×64 OLED. It displays
-the Bitaxe logo, device identity, IP address, hashrate, best share,
-temperature, power, frequency, and fan speed.
-
-The XML binds all visible metrics to LVGL subjects. Application code can update
-them together with `bonanza_ui_set_metrics()`. In normal operation, the main
-loop calls this after receiving BAP updates, alongside `bonanza_ui_set_data()`
-for the retro UI. Metrics use string subjects so
-missing values can show placeholders alongside their units. For example:
-
-```c
-lv_subject_copy_string(&hashrate_text, "1200GH/s");
-lv_subject_copy_string(&temperature_text, "58C");
-lv_subject_copy_string(&power_text, "17W");
-```
-
-The firmware also updates dial-switch subjects through
-`bonanza_ui_set_dial_state()`, although the current editor screen does not
-display them. Keep all LVGL calls on the same core/thread as `lv_timer_handler()` unless
-synchronization is added.
+`ui/screens/main_screen.xml` is the earlier editor-designed dashboard, with
+its subjects in `globals.xml`. It is still part of the editor project, but the
+firmware no longer shows it. Keep all LVGL calls on the same core/thread as
+`lv_timer_handler()` unless synchronization is added.
 
 ### Preview troubleshooting
 
@@ -554,6 +562,7 @@ bonanzaDisplay/
 ├── .gitignore                  # Build, firmware, and editor-cache exclusions
 ├── bonanzaDisplay-fw.code-workspace # Opens UI at the LVGL Editor project root
 ├── CMakeLists.txt              # Top-level build configuration
+├── VERSION                     # Firmware version number
 ├── config/
 │   ├── lv_conf.h               # LVGL configuration
 │   └── pin_config.h            # GPIO pin assignments
@@ -595,8 +604,8 @@ bonanzaDisplay/
 │   │   ├── bitaxe_logo.png     # Editable logo source
 │   │   └── bitaxe_logo_data.c  # Editor-generated L8 image data
 │   ├── screens/
-│   │   ├── main_screen.xml     # Editable screen source (the STUDIO page)
-│   │   └── main_screen_gen.c   # Editor-generated firmware source
+│   │   ├── main_screen.xml     # Earlier editor dashboard; no longer shown
+│   │   └── main_screen_gen.c   # Its editor-generated source
 │   ├── app/                    # Retro UI: plain C, no LVGL or Pico SDK
 │   │   ├── bz_app.c            # Modes, dial input, settings, meter statistics
 │   │   ├── bz_boot.c           # Loading screen
@@ -630,8 +639,8 @@ bonanzaDisplay/
 ```
 
 1. The **retro UI** draws each frame into its own 256×64 L8 framebuffer.
-   LVGL shows that through one full-screen image (or renders the editor's
-   `STUDIO` screen instead) into an L8 (8-bit luminance) double buffer.
+   LVGL shows that through one full-screen image, rendered into an L8
+   (8-bit luminance) double buffer.
 2. The CPU-side **flush callback** packs L8 → 4bpp by taking each pixel's upper
    nibble and combining two adjacent pixels per byte.
 3. **DMA** transfers the packed buffer to the PIO TX FIFO without CPU-driven

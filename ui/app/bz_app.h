@@ -17,6 +17,10 @@ typedef struct {
     bool (*save)(const uint8_t *blob, size_t size);
     // level is 0 (dimmest) .. BZ_BRIGHTNESS_LEVELS-1. May be NULL.
     void (*set_brightness)(uint8_t level);
+    // Firmware version ("0.1.0") and build id (git revision) for the loading
+    // screen. Either may be NULL.
+    const char *version;
+    const char *build;
 } bz_platform_t;
 
 typedef enum { BZ_MODE_BOOT, BZ_MODE_MINING, BZ_MODE_MENU } bz_mode_t;
@@ -31,8 +35,6 @@ void bz_app_input(int steps, bool pressed, uint32_t now_ms);
 bool bz_app_tick(uint32_t now_ms);
 
 bz_mode_t bz_app_mode(void);
-// True while the mining page is the LVGL Editor screen rather than bz_fb.
-bool bz_app_shows_studio(void);
 const bz_settings_t *bz_app_settings(void);
 
 #endif

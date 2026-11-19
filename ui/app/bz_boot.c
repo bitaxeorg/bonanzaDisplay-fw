@@ -1,5 +1,5 @@
-// Retro loading screen: the Bitaxe logo, a typed-out power-on self test log
-// that follows the real host start-up, and a dithered progress meter.
+// Retro loading screen: the Bitaxe logo, a typed-out start-up log that
+// follows the real host start-up, and a dithered progress bar.
 
 #include "bz_internal.h"
 
@@ -7,9 +7,10 @@
 #include <string.h>
 
 #define LOG_COLS 28
-#define LOG_ROWS 5
+#define LOG_ROWS 7
 #define LOG_MAX 12
 #define LOG_X 88
+#define BAR_Y 58             // Progress bar: this row to the bottom edge
 #define TYPE_MS 14u          // Per character
 #define CRT_BLANK_MS 120u    // Power-on: dark, then a line, then the picture
 #define CRT_LINE_MS 320u
@@ -26,9 +27,9 @@ static struct {
     int typed_line;  // First line not yet fully typed
     int typed_chars;
     uint32_t next_char;
-    int wait_line;   // Line that ends in a spinner until the link is up, or -1
+    int wait_line;   // Line that ends in a spinner until its step is done, or -1
     bz_link_t last_link;
-    bool said_link, said_host, said_wifi, said_hash;
+    bool said_link, said_host, said_wifi, said_asic, said_hash;
     uint32_t link_since;
     int progress;    // 0..1000
     uint8_t creep;
@@ -47,9 +48,22 @@ static void push(const char *text) {
     snprintf(b.lines[b.count++], sizeof(b.lines[0]), "%s", text);
 }
 
-static void push_link_line(void) {
-    push("BAP LINK 115200-8N1 ... ");
+// Queues a line for a step that is still in progress. It shows a spinner
+// until finish_wait() marks it done.
+static void push_wait(const char *text) {
+    push(text);
     b.wait_line = b.count - 1;
+}
+
+static void finish_wait(const char *result) {
+    if (b.wait_line < 0) return;
+    char *line = b.lines[b.wait_line];
+    strncat(line, result, LOG_COLS - strlen(line));
+    b.wait_line = -1;
+}
+
+static void push_link_line(void) {
+    push_wait("BAP LINK 115200-8N1 ... ");
 }
 
 void bz_boot_enter(bool cold) {
@@ -59,8 +73,14 @@ void bz_boot_enter(bool cold) {
     b.wait_line = -1;
     b.last_link = BZ_LINK_WAITING;
     if (cold) {
-        push("BONANZA DISPLAY BIOS V3.1");
-        push("RP2354A 256X64 16-GRAY  OK");
+        char line[64];
+        if (bz.version && *bz.version) snprintf(line, sizeof(line), "BONANZA DISPLAY V%s", bz.version);
+        else snprintf(line, sizeof(line), "BONANZA DISPLAY");
+        push(line);
+        if (bz.build && *bz.build) {
+            snprintf(line, sizeof(line), "BUILD %s", bz.build);
+            push(line);
+        }
         push_link_line();
     } else if (bz.data.link == BZ_LINK_WAITING) {
         push("HOST LINK LOST");
@@ -74,7 +94,8 @@ static bool typing_finished(void) {
 }
 
 static int progress_target(void) {
-    return 100 + 300 * b.said_link + 200 * b.said_host + 200 * b.said_wifi + 200 * b.said_hash;
+    return 100 + 250 * b.said_link + 150 * b.said_host + 150 * b.said_wifi + 100 * b.said_asic +
+           250 * b.said_hash;
 }
 
 void bz_boot_tick(void) {
@@ -83,6 +104,7 @@ void bz_boot_tick(void) {
 
     // ---- Follow the host ------------------------------------------------------
     if (d->link != b.last_link) {
+        if (d->link != BZ_LINK_CONNECTED) b.wait_line = -1; // That step will not finish
         if (d->link == BZ_LINK_AP_MODE) {
             push("HOST IN WIFI SETUP MODE");
             push("JOIN THE BITAXE AP TO SETUP");
@@ -92,46 +114,53 @@ void bz_boot_tick(void) {
             push("HOST LINK LOST");
         }
         if (d->link != BZ_LINK_CONNECTED) {
-            b.said_link = b.said_host = b.said_wifi = b.said_hash = false;
+            b.said_link = b.said_host = b.said_wifi = b.said_asic = b.said_hash = false;
             b.ready = false;
-            if (b.wait_line < 0) push_link_line();
+            push_link_line();
         }
         b.last_link = d->link;
     }
     if (d->link == BZ_LINK_CONNECTED) {
+        bool hashing = d->hashrate_ghs != BZ_UNKNOWN && d->hashrate_ghs > 0;
         if (!b.said_link) {
             b.said_link = true;
             b.link_since = bz.now;
-            if (b.wait_line >= 0) {
-                strncat(b.lines[b.wait_line], "OK", LOG_COLS - strlen(b.lines[b.wait_line]));
-                b.wait_line = -1;
-            } else {
-                push("BAP LINK OK");
-            }
+            if (b.wait_line >= 0) finish_wait("OK");
+            else push("BAP LINK OK");
         }
         if (!b.said_host && *d->family && *d->asic) {
             b.said_host = true;
             snprintf(line, sizeof(line), "HOST %s %s", d->family, d->asic);
             push(line);
         }
-        if (!b.said_wifi && *d->ip && strcmp(d->ip, "--")) {
+        if (!b.said_wifi && *d->ip) {
             b.said_wifi = true;
             snprintf(line, sizeof(line), "WIFI %s", d->ip);
             push(line);
         }
+        // ESP-Miner only brings up the ASIC once WiFi is connected, and
+        // reports no hashrate until the chip is initialised and mining. Say
+        // so, rather than sitting silently on the WiFi line.
+        if (!b.said_asic && b.said_wifi && !hashing && !b.said_hash) {
+            b.said_asic = true;
+            snprintf(line, sizeof(line), "%.8s INIT ... ", *d->asic ? d->asic : "ASIC");
+            push_wait(line);
+        }
         if (!b.said_hash) {
-            bool hashing = d->hashrate_ghs != BZ_UNKNOWN && d->hashrate_ghs > 0;
+            bool give_up = !hashing && bz.now - b.link_since >= NO_HASH_MS;
             if (hashing) {
                 bz_reading_t r;
                 bz_metric_read(BZ_M_HASHRATE, d, &r);
-                snprintf(line, sizeof(line), "ASIC HASHING %s %s", r.value, r.unit);
+                finish_wait("OK");
+                snprintf(line, sizeof(line), "HASHING %s %s", r.value, r.unit);
                 push(line);
-            } else if (bz.now - b.link_since >= NO_HASH_MS) {
+            } else if (give_up) {
+                b.wait_line = -1;
                 push("NO HASHRATE YET. STANDBY");
             }
-            if (hashing || bz.now - b.link_since >= NO_HASH_MS) {
+            if (hashing || give_up) {
                 // Skip any milestones the host never reported.
-                b.said_hash = b.said_host = b.said_wifi = true;
+                b.said_hash = b.said_host = b.said_wifi = b.said_asic = true;
             }
         }
     }
@@ -139,7 +168,7 @@ void bz_boot_tick(void) {
     // ---- Typewriter -----------------------------------------------------------
     while (!typing_finished() && (int32_t)(bz.now - b.next_char) >= 0) {
         b.next_char += TYPE_MS;
-        // The spinner line stays open (cursor after it) until the link is up.
+        // A waiting line stays open (spinner after it) until its step is done.
         int length = (int)strlen(b.lines[b.typed_line]);
         if (b.typed_chars < length) {
             b.typed_chars++;
@@ -154,7 +183,7 @@ void bz_boot_tick(void) {
     }
     if (typing_finished()) b.next_char = bz.now;
 
-    // ---- Progress meter -------------------------------------------------------
+    // ---- Progress bar ---------------------------------------------------------
     int target = progress_target();
     if (b.progress < target) {
         int step = (target - b.progress) / 10;
@@ -204,42 +233,12 @@ static void draw_log(void) {
     }
 }
 
-static void draw_meter(void) {
-    const int x0 = 2, x1 = 216; // Fill travel
-    char text[8];
-
-    // Scale and ticks, 0..100 %.
-    for (int i = 0; i <= 4; ++i) {
-        int x = x0 + i * (x1 - x0) / 4;
-        snprintf(text, sizeof(text), "%d", i * 25);
-        if (i == 0) bz_text(0, 44, text, BZ_FONT_TINY, BZ_MID);
-        else if (i == 4) bz_text_right(219, 44, text, BZ_FONT_TINY, BZ_MID);
-        else bz_text_center(x + 1, 44, text, BZ_FONT_TINY, BZ_MID);
-        bz_vline(x, 50, 2, BZ_WHITE);
-    }
-    bz_hdots(0, 53, 219, BZ_WHITE);
-    bz_hdots(0, 63, 219, BZ_WHITE);
-    bz_vline(0, 50, 14, BZ_WHITE);
-    bz_vline(218, 50, 14, BZ_WHITE);
-
-    int fill = (x1 - x0) * b.progress / 1000;
-    if (fill > 0) {
-        bz_dither(x0, 55, fill, 7, BZ_WHITE, (int)((bz.now / 200u) & 1u));
-        bz_vline(x0 + fill, 55, 7, BZ_WHITE);
-    }
-
-    // Two-row status badge: percentage over an inverse state tag.
-    const char *state = b.ready ? "READY"
-                        : bz.data.link == BZ_LINK_AP_MODE ? "SETUP"
-                        : bz.data.link == BZ_LINK_RESTARTING ? "RESET"
-                        : bz.data.link == BZ_LINK_CONNECTED ? "LOAD" : "WAIT";
-    snprintf(text, sizeof(text), "%d%%", b.progress / 10);
-    bz_rect(223, 43, 33, 11, BZ_WHITE);
-    bz_text_center(240, 45, text, BZ_FONT_SMALL, BZ_WHITE);
-    bool flash = b.ready && (bz.now / 150u) % 2u;
-    bz_fill(223, 54, 33, 10, flash ? BZ_BLACK : BZ_WHITE);
-    bz_rect(223, 54, 33, 10, BZ_WHITE);
-    bz_text_center(240, 55, state, BZ_FONT_SMALL, flash ? BZ_WHITE : BZ_BLACK);
+// A plain checkered bar across the bottom edge.
+static void draw_progress(void) {
+    int fill = BZ_W * b.progress / 1000;
+    if (fill <= 0) return;
+    bz_dither(0, BAR_Y, fill, BZ_H - BAR_Y, BZ_WHITE, (int)((bz.now / 200u) & 1u));
+    if (fill < BZ_W) bz_vline(fill - 1, BAR_Y, BZ_H - BAR_Y, BZ_WHITE);
 }
 
 void bz_boot_draw(void) {
@@ -252,10 +251,10 @@ void bz_boot_draw(void) {
         return;
     }
 
-    bz_bitmap(3, 1, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_WHITE);
-    bz_text_center(41, 34, "OPEN SOURCE MINING", BZ_FONT_TINY, BZ_MID);
+    bz_bitmap(3, 8, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_WHITE);
+    bz_text_center(41, 42, "OPEN SOURCE MINING", BZ_FONT_TINY, BZ_MID);
     draw_log();
-    draw_meter();
+    draw_progress();
 
     if (b.cold && t < CRT_OPEN_MS) {
         // The picture opens vertically from that line.
