@@ -6,4 +6,5 @@ list(
   ${CMAKE_CURRENT_LIST_DIR}/bonanza_ui.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/fmtowns_8x16_data.c
   ${CMAKE_CURRENT_LIST_DIR}/fonts/portfolio_6x8_data.c
-  ${CMAKE_CURRENT_LIST_DIR}/images/bitaxe_logo_data.c)
+  ${CMAKE_CURRENT_LIST_DIR}/images/bitaxe_logo_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/images/studio_layer_1_data.c)

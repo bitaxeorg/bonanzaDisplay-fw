@@ -10,20 +10,22 @@
         <int name="ccw_count" value="0" />
         <int name="press_count" value="0" />
         <int name="dial_phase" value="0" />
-        <int name="hashrate_ghs" value="1200" />
-        <int name="asic_temp_c" value="58" />
-        <int name="power_w" value="17" />
-        <int name="frequency_mhz" value="621" />
-        <int name="fan_percent" value="66" />
-        <string name="device_identity" value="BONANZA 1002" />
-        <string name="device_name_text" value="battleaxe" />
-        <string name="ip_address_text" value="192.168.1.234" />
-        <string name="best_share_text" value="123T" />
+        <string name="hashrate_text" value="--GH/s" />
+        <string name="temperature_text" value="--C" />
+        <string name="power_text" value="--W" />
+        <string name="frequency_text" value="--MHz" />
+        <string name="fan_text" value="--RPM" />
+        <string name="device_identity" value="BITAXE" />
+        <string name="device_name_text" value="Waiting for BAP" />
+        <string name="ip_address_text" value="--" />
+        <string name="best_share_text" value="--" />
     </subjects>
     <images>
         <!-- Derived from ESP-Miner main/logo.c::bitaxe_logo_map. -->
         <data name="bitaxe_logo" src_path="images/bitaxe_logo.png"
               color_format="l8" />
+        <data name="studio_layer_1" src_path="images/studio_layer_1.png"
+              color_format="argb8888" />
     </images>
     <fonts>
         <bin name="fmtowns_8x16" src_path="fonts/Px437_FMTowns_re_8x16.ttf"

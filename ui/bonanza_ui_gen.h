@@ -56,6 +56,7 @@ extern lv_font_t * portfolio_6x8;
  *----------------*/
 
 extern const void * bitaxe_logo;
+extern const void * studio_layer_1;
 
 /*----------------
  * Subjects
@@ -68,11 +69,11 @@ extern lv_subject_t cw_count;
 extern lv_subject_t ccw_count;
 extern lv_subject_t press_count;
 extern lv_subject_t dial_phase;
-extern lv_subject_t hashrate_ghs;
-extern lv_subject_t asic_temp_c;
-extern lv_subject_t power_w;
-extern lv_subject_t frequency_mhz;
-extern lv_subject_t fan_percent;
+extern lv_subject_t hashrate_text;
+extern lv_subject_t temperature_text;
+extern lv_subject_t power_text;
+extern lv_subject_t frequency_text;
+extern lv_subject_t fan_text;
 extern lv_subject_t device_identity;
 extern lv_subject_t device_name_text;
 extern lv_subject_t ip_address_text;

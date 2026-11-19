@@ -1,185 +1,202 @@
 /**
  * @file main_screen_gen.c
- * @brief Template source file for LVGL objects
+ * @brief Bonanza Pixel Studio layout from main_screen.xml.
  */
-
-/*********************
- *      INCLUDES
- *********************/
 
 #include "main_screen_gen.h"
 #include "bonanza_ui.h"
-
-/*********************
- *      DEFINES
- *********************/
-
-/**********************
- *      TYPEDEFS
- **********************/
-
-/***********************
- *  STATIC VARIABLES
- **********************/
-
-/***********************
- *  STATIC PROTOTYPES
- **********************/
-
-/**********************
- *   GLOBAL FUNCTIONS
- **********************/
 
 lv_obj_t * main_screen_create(void)
 {
     LV_TRACE_OBJ_CREATE("begin");
 
-    static lv_style_t screen_style;
-    static lv_style_t divider_style;
-    static lv_style_t metric_style;
-    static lv_style_t caption_style;
-    static lv_style_t logo_style;
-    static lv_style_t name_style;
-
+    static lv_style_t studio_screen;
+    static lv_style_t studio_1;
+    static lv_style_t studio_2;
+    static lv_style_t studio_3;
+    static lv_style_t studio_4;
+    static lv_style_t studio_5;
+    static lv_style_t studio_6;
+    static lv_style_t studio_7;
+    static lv_style_t studio_8;
+    static lv_style_t studio_9;
+    static lv_style_t studio_10;
+    static lv_style_t studio_11;
+    static lv_style_t studio_12;
+    static lv_style_t studio_13;
+    static lv_style_t studio_14;
+    static lv_style_t studio_15;
     static bool style_inited = false;
 
     if (!style_inited) {
-        lv_style_init(&screen_style);
-        lv_style_set_bg_color(&screen_style, lv_color_hex(0x080a0d));
-        lv_style_set_bg_opa(&screen_style, (255 * 100 / 100));
-        lv_style_set_border_width(&screen_style, 0);
-        lv_style_set_pad_all(&screen_style, 0);
+        lv_style_init(&studio_screen);
+        lv_style_set_bg_color(&studio_screen, lv_color_hex(0x000000));
+        lv_style_set_bg_opa(&studio_screen, (255 * 100 / 100));
+        lv_style_set_border_width(&studio_screen, 0);
+        lv_style_set_pad_all(&studio_screen, 0);
 
-        lv_style_init(&divider_style);
-        lv_style_set_bg_color(&divider_style, lv_color_hex(0x252a31));
-        lv_style_set_bg_opa(&divider_style, (255 * 100 / 100));
-        lv_style_set_border_width(&divider_style, 0);
-        lv_style_set_radius(&divider_style, 0);
+        lv_style_init(&studio_1);
+        lv_style_set_text_font(&studio_1, portfolio_6x8);
+        lv_style_set_text_color(&studio_1, lv_color_hex(0x333333));
 
-        lv_style_init(&metric_style);
-        lv_style_set_text_color(&metric_style, lv_color_hex(0xFFFFFF));
-        lv_style_set_text_font(&metric_style, fmtowns_8x16);
+        lv_style_init(&studio_2);
+        lv_style_set_text_font(&studio_2, portfolio_6x8);
+        lv_style_set_text_color(&studio_2, lv_color_hex(0xaaaaaa));
 
-        lv_style_init(&caption_style);
-        lv_style_set_text_color(&caption_style, lv_color_hex(0x333333));
-        lv_style_set_text_font(&caption_style, portfolio_6x8);
+        lv_style_init(&studio_3);
+        lv_style_set_text_font(&studio_3, portfolio_6x8);
+        lv_style_set_text_color(&studio_3, lv_color_hex(0xaaaaaa));
 
-        lv_style_init(&logo_style);
-        lv_style_set_image_recolor(&logo_style, lv_color_hex(0x888888));
-        lv_style_set_image_recolor_opa(&logo_style, (255 * 100 / 100));
+        lv_style_init(&studio_4);
+        lv_style_set_text_font(&studio_4, fmtowns_8x16);
+        lv_style_set_text_color(&studio_4, lv_color_hex(0xffffff));
 
-        lv_style_init(&name_style);
-        lv_style_set_text_color(&name_style, lv_color_hex(0xAAAAAA));
-        lv_style_set_text_font(&name_style, portfolio_6x8);
+        lv_style_init(&studio_5);
+        lv_style_set_text_font(&studio_5, portfolio_6x8);
+        lv_style_set_text_color(&studio_5, lv_color_hex(0x222222));
+
+        lv_style_init(&studio_6);
+        lv_style_set_text_font(&studio_6, fmtowns_8x16);
+        lv_style_set_text_color(&studio_6, lv_color_hex(0xffffff));
+
+        lv_style_init(&studio_7);
+        lv_style_set_text_font(&studio_7, portfolio_6x8);
+        lv_style_set_text_color(&studio_7, lv_color_hex(0x222222));
+
+        lv_style_init(&studio_8);
+        lv_style_set_text_font(&studio_8, fmtowns_8x16);
+        lv_style_set_text_color(&studio_8, lv_color_hex(0xffffff));
+
+        lv_style_init(&studio_9);
+        lv_style_set_text_font(&studio_9, portfolio_6x8);
+        lv_style_set_text_color(&studio_9, lv_color_hex(0x222222));
+
+        lv_style_init(&studio_10);
+        lv_style_set_text_font(&studio_10, fmtowns_8x16);
+        lv_style_set_text_color(&studio_10, lv_color_hex(0xffffff));
+
+        lv_style_init(&studio_11);
+        lv_style_set_text_font(&studio_11, portfolio_6x8);
+        lv_style_set_text_color(&studio_11, lv_color_hex(0x222222));
+
+        lv_style_init(&studio_12);
+        lv_style_set_text_font(&studio_12, fmtowns_8x16);
+        lv_style_set_text_color(&studio_12, lv_color_hex(0xffffff));
+
+        lv_style_init(&studio_13);
+        lv_style_set_text_font(&studio_13, portfolio_6x8);
+        lv_style_set_text_color(&studio_13, lv_color_hex(0x222222));
+
+        lv_style_init(&studio_14);
+        lv_style_set_text_font(&studio_14, fmtowns_8x16);
+        lv_style_set_text_color(&studio_14, lv_color_hex(0xffffff));
+
+        lv_style_init(&studio_15);
+        lv_style_set_text_font(&studio_15, portfolio_6x8);
+        lv_style_set_text_color(&studio_15, lv_color_hex(0x222222));
 
         style_inited = true;
     }
 
-    lv_obj_t * lv_obj_0 = lv_obj_create(NULL);
-    lv_obj_set_name_static(lv_obj_0, "main_screen_#");
+    lv_obj_t * screen = lv_obj_create(NULL);
+    lv_obj_set_name_static(screen, "main_screen_#");
+    lv_obj_add_style(screen, &studio_screen, 0);
 
-    lv_obj_add_style(lv_obj_0, &screen_style, 0);
-    lv_obj_t * lv_image_0 = lv_image_create(lv_obj_0);
-    lv_obj_set_x(lv_image_0, 10);
-    lv_obj_set_y(lv_image_0, 0);
-    lv_image_set_src(lv_image_0, bitaxe_logo);
-    lv_obj_add_style(lv_image_0, &logo_style, 0);
-    
-    lv_obj_t * lv_label_0 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_0, 17);
-    lv_obj_set_y(lv_label_0, 31);
-    lv_label_bind_text(lv_label_0, &device_identity, NULL);
-    lv_obj_add_style(lv_label_0, &caption_style, 0);
-    
-    lv_obj_t * lv_label_1 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_1, 10);
-    lv_obj_set_y(lv_label_1, 45);
-    lv_label_bind_text(lv_label_1, &device_name_text, NULL);
-    lv_obj_add_style(lv_label_1, &name_style, 0);
-    
-    lv_obj_t * lv_label_2 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_2, 10);
-    lv_obj_set_y(lv_label_2, 54);
-    lv_label_bind_text(lv_label_2, &ip_address_text, NULL);
-    lv_obj_add_style(lv_label_2, &name_style, 0);
-    
-    lv_obj_t * lv_label_3 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_3, 112);
-    lv_obj_set_y(lv_label_3, 0);
-    lv_label_bind_text(lv_label_3, &hashrate_ghs, "%dGH/s");
-    lv_obj_add_style(lv_label_3, &metric_style, 0);
-    
-    lv_obj_t * lv_label_4 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_4, 120);
-    lv_obj_set_y(lv_label_4, 13);
-    lv_label_set_text(lv_label_4, "HASHRATE");
-    lv_obj_add_style(lv_label_4, &caption_style, 0);
-    
-    lv_obj_t * lv_label_5 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_5, 112);
-    lv_obj_set_y(lv_label_5, 21);
-    lv_label_bind_text(lv_label_5, &best_share_text, NULL);
-    lv_obj_add_style(lv_label_5, &metric_style, 0);
-    
-    lv_obj_t * lv_label_6 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_6, 120);
-    lv_obj_set_y(lv_label_6, 34);
-    lv_label_set_text(lv_label_6, "BESTSHARE");
-    lv_obj_add_style(lv_label_6, &caption_style, 0);
-    
-    lv_obj_t * lv_label_7 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_7, 112);
-    lv_obj_set_y(lv_label_7, 42);
-    lv_label_bind_text(lv_label_7, &asic_temp_c, "%dC");
-    lv_obj_add_style(lv_label_7, &metric_style, 0);
-    
-    lv_obj_t * lv_label_8 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_8, 120);
-    lv_obj_set_y(lv_label_8, 55);
-    lv_label_set_text(lv_label_8, "TEMP");
-    lv_obj_add_style(lv_label_8, &caption_style, 0);
-    
-    lv_obj_t * lv_label_9 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_9, 191);
-    lv_obj_set_y(lv_label_9, 0);
-    lv_label_bind_text(lv_label_9, &power_w, "%dW");
-    lv_obj_add_style(lv_label_9, &metric_style, 0);
-    
-    lv_obj_t * lv_label_10 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_10, 199);
-    lv_obj_set_y(lv_label_10, 13);
-    lv_label_set_text(lv_label_10, "POWER");
-    lv_obj_add_style(lv_label_10, &caption_style, 0);
-    
-    lv_obj_t * lv_label_11 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_11, 191);
-    lv_obj_set_y(lv_label_11, 21);
-    lv_label_bind_text(lv_label_11, &frequency_mhz, "%dMHz");
-    lv_obj_add_style(lv_label_11, &metric_style, 0);
-    
-    lv_obj_t * lv_label_12 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_12, 199);
-    lv_obj_set_y(lv_label_12, 34);
-    lv_label_set_text(lv_label_12, "FREQUENCY");
-    lv_obj_add_style(lv_label_12, &caption_style, 0);
-    
-    lv_obj_t * lv_label_13 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_13, 191);
-    lv_obj_set_y(lv_label_13, 42);
-    lv_label_bind_text(lv_label_13, &fan_percent, "%d%%");
-    lv_obj_add_style(lv_label_13, &metric_style, 0);
-    
-    lv_obj_t * lv_label_14 = lv_label_create(lv_obj_0);
-    lv_obj_set_x(lv_label_14, 199);
-    lv_obj_set_y(lv_label_14, 55);
-    lv_label_set_text(lv_label_14, "FAN");
-    lv_obj_add_style(lv_label_14, &caption_style, 0);
+    lv_obj_t * layer_1 = lv_image_create(screen);
+    lv_obj_set_x(layer_1, 2);
+    lv_obj_set_y(layer_1, 2);
+    lv_image_set_src(layer_1, studio_layer_1);
+
+    lv_obj_t * layer_2 = lv_label_create(screen);
+    lv_obj_set_x(layer_2, 7);
+    lv_obj_set_y(layer_2, 32);
+    lv_label_bind_text(layer_2, &device_identity, NULL);
+    lv_obj_add_style(layer_2, &studio_1, 0);
+
+    lv_obj_t * layer_3 = lv_label_create(screen);
+    lv_obj_set_x(layer_3, 2);
+    lv_obj_set_y(layer_3, 46);
+    lv_label_bind_text(layer_3, &device_name_text, NULL);
+    lv_obj_add_style(layer_3, &studio_2, 0);
+
+    lv_obj_t * layer_4 = lv_label_create(screen);
+    lv_obj_set_x(layer_4, 1);
+    lv_obj_set_y(layer_4, 55);
+    lv_label_bind_text(layer_4, &ip_address_text, NULL);
+    lv_obj_add_style(layer_4, &studio_3, 0);
+
+    lv_obj_t * layer_5 = lv_label_create(screen);
+    lv_obj_set_x(layer_5, 106);
+    lv_obj_set_y(layer_5, 1);
+    lv_label_bind_text(layer_5, &hashrate_text, NULL);
+    lv_obj_add_style(layer_5, &studio_4, 0);
+
+    lv_obj_t * layer_6 = lv_label_create(screen);
+    lv_obj_set_x(layer_6, 113);
+    lv_obj_set_y(layer_6, 14);
+    lv_label_set_text(layer_6, "HASHRATE");
+    lv_obj_add_style(layer_6, &studio_5, 0);
+
+    lv_obj_t * layer_7 = lv_label_create(screen);
+    lv_obj_set_x(layer_7, 106);
+    lv_obj_set_y(layer_7, 22);
+    lv_label_bind_text(layer_7, &best_share_text, NULL);
+    lv_obj_add_style(layer_7, &studio_6, 0);
+
+    lv_obj_t * layer_8 = lv_label_create(screen);
+    lv_obj_set_x(layer_8, 113);
+    lv_obj_set_y(layer_8, 35);
+    lv_label_set_text(layer_8, "BESTSHARE");
+    lv_obj_add_style(layer_8, &studio_7, 0);
+
+    lv_obj_t * layer_9 = lv_label_create(screen);
+    lv_obj_set_x(layer_9, 106);
+    lv_obj_set_y(layer_9, 43);
+    lv_label_bind_text(layer_9, &temperature_text, NULL);
+    lv_obj_add_style(layer_9, &studio_8, 0);
+
+    lv_obj_t * layer_10 = lv_label_create(screen);
+    lv_obj_set_x(layer_10, 113);
+    lv_obj_set_y(layer_10, 56);
+    lv_label_set_text(layer_10, "TEMP");
+    lv_obj_add_style(layer_10, &studio_9, 0);
+
+    lv_obj_t * layer_11 = lv_label_create(screen);
+    lv_obj_set_x(layer_11, 191);
+    lv_obj_set_y(layer_11, 1);
+    lv_label_bind_text(layer_11, &power_text, NULL);
+    lv_obj_add_style(layer_11, &studio_10, 0);
+
+    lv_obj_t * layer_12 = lv_label_create(screen);
+    lv_obj_set_x(layer_12, 199);
+    lv_obj_set_y(layer_12, 14);
+    lv_label_set_text(layer_12, "POWER");
+    lv_obj_add_style(layer_12, &studio_11, 0);
+
+    lv_obj_t * layer_13 = lv_label_create(screen);
+    lv_obj_set_x(layer_13, 191);
+    lv_obj_set_y(layer_13, 22);
+    lv_label_bind_text(layer_13, &frequency_text, NULL);
+    lv_obj_add_style(layer_13, &studio_12, 0);
+
+    lv_obj_t * layer_14 = lv_label_create(screen);
+    lv_obj_set_x(layer_14, 199);
+    lv_obj_set_y(layer_14, 35);
+    lv_label_set_text(layer_14, "FREQUENCY");
+    lv_obj_add_style(layer_14, &studio_13, 0);
+
+    lv_obj_t * layer_15 = lv_label_create(screen);
+    lv_obj_set_x(layer_15, 191);
+    lv_obj_set_y(layer_15, 43);
+    lv_label_bind_text(layer_15, &fan_text, NULL);
+    lv_obj_add_style(layer_15, &studio_14, 0);
+
+    lv_obj_t * layer_16 = lv_label_create(screen);
+    lv_obj_set_x(layer_16, 199);
+    lv_obj_set_y(layer_16, 56);
+    lv_label_set_text(layer_16, "FAN");
+    lv_obj_add_style(layer_16, &studio_15, 0);
 
     LV_TRACE_OBJ_CREATE("finished");
-
-    return lv_obj_0;
+    return screen;
 }
-
-/**********************
- *   STATIC FUNCTIONS
- **********************/

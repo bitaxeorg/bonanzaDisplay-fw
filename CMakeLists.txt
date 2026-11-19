@@ -34,9 +34,11 @@ set_target_properties(lvgl PROPERTIES SOURCES "${LVGL_SOURCES}")
 # --------------------------------------------------------------------------
 add_executable(${PROJECT_NAME}
     src/main.c
-    src/control/i2c_control.c
+    src/control/bap_client.c
+    src/control/bap_control.c
     src/display/ssd1322.c
     src/input/dial_switch.c
+    src/storage/settings_store.c
     src/lvgl_port/lv_port_disp.c
     src/lvgl_port/lv_port_indev.c
     src/fonts/lv_font_portfolio_6x8.c
@@ -54,6 +56,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/control
     ${CMAKE_CURRENT_SOURCE_DIR}/src/display
     ${CMAKE_CURRENT_SOURCE_DIR}/src/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lvgl_port
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fonts
     ${CMAKE_CURRENT_SOURCE_DIR}/config
@@ -64,9 +67,10 @@ target_link_libraries(${PROJECT_NAME}
     hardware_gpio
     hardware_pio
     hardware_dma
+    hardware_flash
+    hardware_sync
     hardware_timer
-    hardware_i2c
-    pico_i2c_slave
+    hardware_uart
     lvgl
     lib-ui
 )
@@ -75,7 +79,7 @@ if(BONANZA_DISPLAY_BRINGUP_TEST)
     target_compile_definitions(${PROJECT_NAME} PRIVATE BONANZA_DISPLAY_BRINGUP_TEST=1)
 endif()
 
-# USB output for printf debugging, disable UART
+# USB-only printf debugging; UART1 is reserved for BAP
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
 pico_enable_stdio_uart(${PROJECT_NAME} 0)
 

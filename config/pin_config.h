@@ -7,7 +7,7 @@
 // ==========================================================================
 
 // --- 8080 Data Bus ---
-// rev2 wires the SSD1322 data bus straight through:
+// v3 wires the SSD1322 data bus straight through:
 //   Display D0..D7 -> GPIO0..GPIO7
 // The PIO drives this contiguous GPIO0..GPIO7 block directly.
 #define PIN_DB0             0
@@ -35,9 +35,11 @@
 #define PIN_DIAL_SW         14        // Push switch contact
 
 // --- bitaxe Control Interface ---
-// GPIO20/21 are the I2C0 SDA/SCL function on RP2350.
-#define PIN_CONTROL_SDA     20
-#define PIN_CONTROL_SCL     21
+// UART1, from the display controller perspective. The schematic net names
+// DISP_RX/DISP_TX are HOST-relative: host RX (GPIO40) <- display TX (GPIO20),
+// host TX (GPIO39) -> display RX (GPIO21), through the reversed 12-pin FFC.
+#define PIN_CONTROL_TX      20
+#define PIN_CONTROL_RX      21
 #define PIN_CONTROL_GPIO1   22        // Reserved for future control use
 #define PIN_CONTROL_GPIO2   23        // Reserved for future control use
 

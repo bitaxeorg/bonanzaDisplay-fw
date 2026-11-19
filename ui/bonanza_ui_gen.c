@@ -58,6 +58,8 @@ extern lv_font_t portfolio_6x8_data;
 
 const void * bitaxe_logo;
 extern const void * bitaxe_logo_data;
+const void * studio_layer_1;
+extern const lv_image_dsc_t studio_layer_1_data;
 
 /*----------------
  * Subjects
@@ -70,16 +72,26 @@ lv_subject_t cw_count;
 lv_subject_t ccw_count;
 lv_subject_t press_count;
 lv_subject_t dial_phase;
-lv_subject_t hashrate_ghs;
-lv_subject_t asic_temp_c;
-lv_subject_t power_w;
-lv_subject_t frequency_mhz;
-lv_subject_t fan_percent;
+lv_subject_t hashrate_text;
+lv_subject_t temperature_text;
+lv_subject_t power_text;
+lv_subject_t frequency_text;
+lv_subject_t fan_text;
 lv_subject_t device_identity;
 lv_subject_t device_name_text;
 lv_subject_t ip_address_text;
 lv_subject_t best_share_text;
 
+static char hashrate_text_buf[UI_SUBJECT_STRING_LENGTH];
+static char hashrate_text_prev_buf[UI_SUBJECT_STRING_LENGTH];
+static char temperature_text_buf[UI_SUBJECT_STRING_LENGTH];
+static char temperature_text_prev_buf[UI_SUBJECT_STRING_LENGTH];
+static char power_text_buf[UI_SUBJECT_STRING_LENGTH];
+static char power_text_prev_buf[UI_SUBJECT_STRING_LENGTH];
+static char frequency_text_buf[UI_SUBJECT_STRING_LENGTH];
+static char frequency_text_prev_buf[UI_SUBJECT_STRING_LENGTH];
+static char fan_text_buf[UI_SUBJECT_STRING_LENGTH];
+static char fan_text_prev_buf[UI_SUBJECT_STRING_LENGTH];
 static char device_identity_buf[UI_SUBJECT_STRING_LENGTH];
 static char device_identity_prev_buf[UI_SUBJECT_STRING_LENGTH];
 static char device_name_text_buf[UI_SUBJECT_STRING_LENGTH];
@@ -119,6 +131,7 @@ void bonanza_ui_init_gen(const char * asset_path)
      * Images
      *----------------*/
     bitaxe_logo = &bitaxe_logo_data;
+    studio_layer_1 = &studio_layer_1_data;
 
     /*----------------
      * Subjects
@@ -130,23 +143,33 @@ void bonanza_ui_init_gen(const char * asset_path)
     lv_subject_init_int(&ccw_count, 0);
     lv_subject_init_int(&press_count, 0);
     lv_subject_init_int(&dial_phase, 0);
-    lv_subject_init_int(&hashrate_ghs, 1200);
-    lv_subject_init_int(&asic_temp_c, 58);
-    lv_subject_init_int(&power_w, 17);
-    lv_subject_init_int(&frequency_mhz, 621);
-    lv_subject_init_int(&fan_percent, 66);
+    lv_subject_init_string(&hashrate_text, hashrate_text_buf,
+                           hashrate_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
+                           "--GH/s");
+    lv_subject_init_string(&temperature_text, temperature_text_buf,
+                           temperature_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
+                           "--C");
+    lv_subject_init_string(&power_text, power_text_buf,
+                           power_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
+                           "--W");
+    lv_subject_init_string(&frequency_text, frequency_text_buf,
+                           frequency_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
+                           "--MHz");
+    lv_subject_init_string(&fan_text, fan_text_buf,
+                           fan_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
+                           "--RPM");
     lv_subject_init_string(&device_identity, device_identity_buf,
                            device_identity_prev_buf, UI_SUBJECT_STRING_LENGTH,
-                           "BONANZA 1002");
+                           "BITAXE");
     lv_subject_init_string(&device_name_text, device_name_text_buf,
                            device_name_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
-                           "battleaxe");
+                           "Waiting for BAP");
     lv_subject_init_string(&ip_address_text, ip_address_text_buf,
                            ip_address_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
-                           "192.168.1.234");
+                           "--");
     lv_subject_init_string(&best_share_text, best_share_text_buf,
                            best_share_text_prev_buf, UI_SUBJECT_STRING_LENGTH,
-                           "123T");
+                           "--");
 
     /*----------------
      * Translations
@@ -167,11 +190,11 @@ void bonanza_ui_init_gen(const char * asset_path)
     lv_xml_register_subject(NULL, "ccw_count", &ccw_count);
     lv_xml_register_subject(NULL, "press_count", &press_count);
     lv_xml_register_subject(NULL, "dial_phase", &dial_phase);
-    lv_xml_register_subject(NULL, "hashrate_ghs", &hashrate_ghs);
-    lv_xml_register_subject(NULL, "asic_temp_c", &asic_temp_c);
-    lv_xml_register_subject(NULL, "power_w", &power_w);
-    lv_xml_register_subject(NULL, "frequency_mhz", &frequency_mhz);
-    lv_xml_register_subject(NULL, "fan_percent", &fan_percent);
+    lv_xml_register_subject(NULL, "hashrate_text", &hashrate_text);
+    lv_xml_register_subject(NULL, "temperature_text", &temperature_text);
+    lv_xml_register_subject(NULL, "power_text", &power_text);
+    lv_xml_register_subject(NULL, "frequency_text", &frequency_text);
+    lv_xml_register_subject(NULL, "fan_text", &fan_text);
     lv_xml_register_subject(NULL, "device_identity", &device_identity);
     lv_xml_register_subject(NULL, "device_name_text", &device_name_text);
     lv_xml_register_subject(NULL, "ip_address_text", &ip_address_text);
@@ -185,6 +208,7 @@ void bonanza_ui_init_gen(const char * asset_path)
 #if LV_USE_XML && !defined(LV_EDITOR_PREVIEW)
     /* Register images */
     lv_xml_register_image(NULL, "bitaxe_logo", bitaxe_logo);
+    lv_xml_register_image(NULL, "studio_layer_1", studio_layer_1);
 #endif
 
 #if LV_USE_XML == 0
