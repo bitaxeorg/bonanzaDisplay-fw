@@ -31,6 +31,7 @@ typedef struct {
     bonanza_link_t link;
     char pool[48];
     char network_difficulty[16]; // Empty until a host that reports it does
+    char hostname[33];           // Likewise; ESP-Miner host names are at most 32 long
     uint32_t power_mw;        // Same reading as power_w, kept to 1 mW
     uint32_t vr_temp_c;
     uint32_t voltage_mv;      // Input voltage; the host reports millivolts

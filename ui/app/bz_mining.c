@@ -8,23 +8,21 @@
 
 // ---- Big numbers ----------------------------------------------------------------
 
-static bool dot_matrix(void) {
-    return bz.settings.digits == BZ_DIGITS_DOT_MATRIX;
-}
-
+// Dot-matrix digits: 3x Portfolio, each font pixel a 2x2 dot.
 int bz_big_text_w(const char *text) {
-    return dot_matrix() ? bz_text_w(text, BZ_FONT_SMALL, 3) : bz_text_w(text, BZ_FONT_LARGE, 2);
+    return bz_text_w(text, BZ_FONT_SMALL, 3);
 }
 
-// Both styles put the top of a digit at y and its foot 26 rows below, so the
-// caller can align units to them: solid is 2x FM Towns (26 rows of caps), dot
-// matrix is 3x Portfolio (7 rows of 2x2 dots, centred in the same band).
+// A digit's first lit row is BIG_TOP below y and its last BIG_BASE below y,
+// so the caller can line text up with either.
 int bz_big_text(int x, int y, const char *text, int level) {
-    if (dot_matrix()) return bz_text_ex(x, y + 3, text, BZ_FONT_SMALL, 3, true, level);
-    return bz_text_ex(x, y, text, BZ_FONT_LARGE, 2, false, level);
+    return bz_text_ex(x, y + 3, text, BZ_FONT_SMALL, 3, true, level);
 }
 
-#define BIG_FOOT 26
+#define BIG_TOP 3
+#define BIG_BASE 22
+// Where small-font text goes to stand on the same baseline as the digits.
+#define BIG_UNIT_Y (BIG_BASE - 6)
 
 // ---- Bar meter ------------------------------------------------------------------
 
@@ -177,8 +175,8 @@ static void draw_graph(int x, int y, int w, int h, bz_metric_t metric, const bz_
 // ---- HERO page --------------------------------------------------------------------
 
 // The page is split by a dotted line: the hero metric and its graph on the
-// left, and on the right four icon metrics over the stratum host and the
-// network difficulty.
+// left, and on the right a device line, four icon metrics, and the stratum
+// host and network difficulty.
 #define HERO_MAIN_W 142   // Hero zone is x 0..141
 #define HERO_SPLIT_X 145
 #define HERO_SIDE_X 149   // Side zone is x 149..255
@@ -219,36 +217,25 @@ static void draw_hero_main(bz_metric_t metric) {
     bz_reading_t r;
     bz_metric_read(metric, &bz.data, &r);
 
-    // Link status cluster in the top right corner of the zone: WiFi bars over
-    // the ASIC badge. A wide hero value takes the badge's place.
-    const int right = HERO_MAIN_W - 1;
-    int badge_left = *bz.data.asic ? right - badge_w(bz.data.asic) + 1 : HERO_MAIN_W;
-    draw_wifi_bars(right - 10, 0);
-
     if (metric == BZ_M_NONE) {
         bz_bitmap(0, 1, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_WHITE);
     } else if (bz_big_text_w(r.value) <= 108) {
+        // The value, then its name over its unit: the name level with the
+        // top of the digits, the unit standing on their baseline.
         int x = bz_big_text(0, 0, r.value, BZ_WHITE) + 4;
         const char *name = bz_metric_name(metric);
-        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) > right - 12) name = bz_metric_short(metric);
-        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) <= right - 12)
-            bz_text(x, 2, name, BZ_FONT_SMALL, BZ_MID);
-        int unit_end = x + bz_text_w(r.unit, BZ_FONT_LARGE, 1);
-        if (unit_end <= HERO_MAIN_W) {
-            bz_text(x, BIG_FOOT - 13, r.unit, BZ_FONT_LARGE, BZ_WHITE);
-        } else {
-            unit_end = x + bz_text_w(r.unit, BZ_FONT_SMALL, 1);
-            bz_text(x, BIG_FOOT - 8, r.unit, BZ_FONT_SMALL, BZ_WHITE);
-        }
-        if (*r.unit && unit_end > badge_left - 2) badge_left = HERO_MAIN_W;
+        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) > HERO_MAIN_W) name = bz_metric_short(metric);
+        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) <= HERO_MAIN_W)
+            bz_text(x, BIG_TOP, name, BZ_FONT_SMALL, BZ_MID);
+        bz_text(x, BIG_UNIT_Y, r.unit, BZ_FONT_SMALL, BZ_WHITE);
     } else {
         // Long text such as an address: one normal-height line.
-        bz_text(0, 0, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
+        bz_icon(0, 1, metric, BZ_WHITE);
+        bz_text(BZ_ICON_SIZE + 4, 2, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
         bz_clip(0, 0, HERO_MAIN_W, BZ_H);
-        bz_text(0, 18, r.value, BZ_FONT_LARGE, BZ_WHITE);
+        bz_text(0, 14, r.value, BZ_FONT_LARGE, BZ_WHITE);
         bz_clip_reset();
     }
-    if (*bz.data.asic && badge_left < HERO_MAIN_W) draw_badge_right(right, 11, bz.data.asic);
 
     if (!r.gauge) {
         // Nothing to graph: use the space for who and where this miner is.
@@ -262,35 +249,27 @@ static void draw_hero_main(bz_metric_t metric) {
     draw_graph(0, 35, BZ_GRAPH_POINTS + 1, 28, metric, &r);
 }
 
-// Side cell: the metric's icon with its value straight after it. The value
-// steps down a font when it is too long, so nothing is cut short without
-// first trying a smaller size.
+// Side cell: the metric's icon, its value in the small font, and its unit in
+// the tiny font, all on one line. A value too long for that loses its unit,
+// then drops to the tiny font itself.
 static void draw_side_cell(int x, int y, bz_metric_t metric) {
     if (metric == BZ_M_NONE) return;
     bz_reading_t r;
     bz_metric_read(metric, &bz.data, &r);
-    const int w = HERO_CELL_W;
-    const int text_x = x + BZ_ICON_SIZE + 3, room = w - BZ_ICON_SIZE - 3;
-    int small_w = bz_text_w(r.value, BZ_FONT_SMALL, 1);
-    // Too long even for the small font: the tiny font, on the full width
-    // under a raised icon.
-    bool tiny = small_w > room + 2;
-    bz_icon(x, tiny ? y : y + 3, metric, BZ_WHITE);
-
-    char joined[sizeof(r.value) + sizeof(r.unit)];
-    snprintf(joined, sizeof(joined), "%s%s", r.value, r.unit);
-    if (tiny) {
-        bz_clip(x, y, w, 16);
-        bz_text(x, y + 11, r.value, BZ_FONT_TINY, BZ_WHITE);
-        bz_clip_reset();
-    } else if (*r.unit && bz_text_w(joined, BZ_FONT_LARGE, 1) <= room) {
-        // Short units ride on the value: "58C", "55.0W".
-        bz_text(text_x, y + 1, joined, BZ_FONT_LARGE, BZ_WHITE);
-    } else if (bz_text_w(r.value, BZ_FONT_LARGE, 1) <= room) {
-        bz_text(text_x, y + 1, r.value, BZ_FONT_LARGE, BZ_WHITE);
+    const int text_x = x + BZ_ICON_SIZE + 3;
+    const int room = HERO_CELL_PITCH - BZ_ICON_SIZE - 3 - 2; // Up to the next cell's icon
+    int value_w = bz_text_w(r.value, BZ_FONT_SMALL, 1);
+    int unit_w = *r.unit ? 1 + bz_text_w(r.unit, BZ_FONT_TINY, 1) : 0;
+    bz_icon(x, y, metric, BZ_WHITE);
+    bz_clip(text_x, y, room, BZ_ICON_SIZE);
+    if (value_w > room) {
+        bz_text(text_x, y + 3, r.value, BZ_FONT_TINY, BZ_WHITE);
     } else {
-        bz_text(small_w > room ? text_x - 2 : text_x, y + 4, r.value, BZ_FONT_SMALL, BZ_WHITE);
+        int end = bz_text(text_x, y + 1, r.value, BZ_FONT_SMALL, BZ_WHITE);
+        // Both fonts sit on the same baseline.
+        if (unit_w && value_w + unit_w <= room) bz_text(end + 1, y + 3, r.unit, BZ_FONT_TINY, BZ_MID);
     }
+    bz_clip_reset();
 }
 
 // Info line: icon, then text in the small font, or the tiny font when the
@@ -308,13 +287,31 @@ static void draw_info_line(int y, bz_metric_t metric, const char *text) {
     }
 }
 
+// Device line: the host's network name (its family name until it reports
+// one), then the WiFi bars and the ASIC badge at the right end.
+static void draw_device_line(int y) {
+    int left = BZ_W;
+    if (*bz.data.asic) {
+        draw_badge_right(BZ_W - 1, y + 1, bz.data.asic);
+        left -= badge_w(bz.data.asic) + 3;
+    }
+    left -= 11;
+    draw_wifi_bars(left, y);
+    bz_clip(HERO_SIDE_X, y, left - 3 - HERO_SIDE_X, 8);
+    bz_text(HERO_SIDE_X, y + 2, *bz.data.hostname ? bz.data.hostname : bz.data.family, BZ_FONT_TINY, BZ_MID);
+    bz_clip_reset();
+}
+
+// Three bands on the right: the device, four metrics, and the network.
 static void draw_hero(const uint8_t *slots) {
     draw_hero_main((bz_metric_t)slots[0]);
     bz_vdots(HERO_SPLIT_X, 0, BZ_H, BZ_MID);
+    draw_device_line(0);
+    bz_hdots(HERO_SIDE_X, 11, BZ_W - HERO_SIDE_X, BZ_MID);
     for (int i = 0; i < 4; ++i)
-        draw_side_cell(HERO_SIDE_X + (i % 2) * HERO_CELL_PITCH, (i / 2) * 17, (bz_metric_t)slots[1 + i]);
-    bz_hdots(HERO_SIDE_X, 36, BZ_W - HERO_SIDE_X, BZ_MID);
-    draw_info_line(40, BZ_M_POOL, bz.data.pool);
+        draw_side_cell(HERO_SIDE_X + (i % 2) * HERO_CELL_PITCH, 15 + (i / 2) * 11, (bz_metric_t)slots[1 + i]);
+    bz_hdots(HERO_SIDE_X, 38, BZ_W - HERO_SIDE_X, BZ_MID);
+    draw_info_line(42, BZ_M_POOL, bz.data.pool);
     draw_info_line(53, BZ_M_NET_DIFF, bz.data.net_diff);
 }
 
@@ -355,11 +352,11 @@ static void draw_duo_half(int x, int w, bz_metric_t metric) {
     bz_metric_read(metric, &bz.data, &r);
     bz_text(x, 0, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
     int big_w = bz_big_text_w(r.value);
-    int unit_w = *r.unit ? 3 + bz_text_w(r.unit, BZ_FONT_LARGE, 1) : 0;
+    int unit_w = *r.unit ? 3 + bz_text_w(r.unit, BZ_FONT_SMALL, 1) : 0;
     bz_clip(x, 0, w, BZ_H);
     if (big_w + unit_w <= w) {
         int end = bz_big_text(x, 10, r.value, BZ_WHITE);
-        bz_text(end + 3, 10 + BIG_FOOT - 13, r.unit, BZ_FONT_LARGE, BZ_WHITE);
+        bz_text(end + 3, 10 + BIG_UNIT_Y, r.unit, BZ_FONT_SMALL, BZ_WHITE);
     } else if (big_w <= w) {
         bz_big_text(x, 10, r.value, BZ_WHITE);
         bz_text_right(x + w - 1, 0, r.unit, BZ_FONT_SMALL, BZ_WHITE);
@@ -406,8 +403,8 @@ void bz_mining_draw(void) {
 // Thumbnail in a 121x33 box: one outlined cell per slot, labelled with the
 // metric it shows. Neighbouring cells share a border.
 void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on) {
-    static const uint8_t hero[5][4] = {{0, 0, 66, 32}, {66, 0, 27, 10}, {93, 0, 27, 10},
-                                       {66, 10, 27, 10}, {93, 10, 27, 10}};
+    static const uint8_t hero[5][4] = {{0, 0, 66, 32}, {66, 7, 27, 9}, {93, 7, 27, 9},
+                                       {66, 16, 27, 9}, {93, 16, 27, 9}};
     static const uint8_t grid[6][4] = {{0, 0, 40, 16}, {40, 0, 40, 16}, {80, 0, 40, 16},
                                        {0, 16, 40, 16}, {40, 16, 40, 16}, {80, 16, 40, 16}};
     static const uint8_t duo[2][4] = {{0, 0, 60, 32}, {60, 0, 60, 32}};
@@ -415,9 +412,12 @@ void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on) {
     const uint8_t (*cells)[4] = page == BZ_PAGE_HERO ? hero : page == BZ_PAGE_GRID ? grid : duo;
     int count = bz_page_slot_count(page);
     if (page == BZ_PAGE_HERO) {
-        // The fixed stratum host and network difficulty lines.
-        bz_rect(x + 66, y + 20, 55, 13, BZ_MID);
-        bz_text_center(x + 94, y + 24, "POOL+NET", BZ_FONT_TINY, BZ_DIM);
+        // The fixed bands: the device line above the metrics, and the
+        // stratum host and network difficulty below.
+        bz_rect(x + 66, y, 55, 8, BZ_MID);
+        bz_text_center(x + 94, y + 2, "DEVICE", BZ_FONT_TINY, BZ_DIM);
+        bz_rect(x + 66, y + 25, 55, 8, BZ_MID);
+        bz_text_center(x + 94, y + 27, "POOL+NET", BZ_FONT_TINY, BZ_DIM);
     }
     for (int i = 0; i < count; ++i) {
         int cx = x + cells[i][0], cy = y + cells[i][1], cw = cells[i][2], ch = cells[i][3];

@@ -175,7 +175,6 @@ void bz_settings_defaults(bz_settings_t *s) {
     };
     memset(s, 0, sizeof(*s));
     s->page = BZ_PAGE_HERO;
-    s->digits = BZ_DIGITS_SOLID;
     s->brightness = BZ_BRIGHTNESS_LEVELS - 1;
     memcpy(s->slots, slots, sizeof(slots));
 }
@@ -200,7 +199,7 @@ void bz_settings_encode(const bz_settings_t *s, uint8_t blob[BZ_SETTINGS_BLOB_SI
     blob[4] = BLOB_VERSION;
     blob[5] = BLOB_PAYLOAD;
     blob[6] = s->page;
-    blob[7] = s->digits;
+    blob[7] = 0; // Was the big-digit style, when there was a choice of two
     blob[8] = s->brightness;
     memcpy(&blob[9], s->slots, sizeof(s->slots));
     uint32_t crc = crc32(blob, BZ_SETTINGS_BLOB_SIZE - 4);
@@ -212,12 +211,10 @@ bool bz_settings_decode(const uint8_t blob[BZ_SETTINGS_BLOB_SIZE], bz_settings_t
         crc32(blob, BZ_SETTINGS_BLOB_SIZE - 4) != stored_crc(blob)) return false;
     bz_settings_t s;
     s.page = blob[6];
-    s.digits = blob[7];
     s.brightness = blob[8];
     memcpy(s.slots, &blob[9], sizeof(s.slots));
     if (s.page == BLOB_PAGE_ROWS - 1u) s.page = BZ_PAGE_HERO; // Was on the removed page
-    if (s.page >= BZ_PAGE_COUNT || s.digits >= BZ_DIGITS_COUNT ||
-        s.brightness >= BZ_BRIGHTNESS_LEVELS) return false;
+    if (s.page >= BZ_PAGE_COUNT || s.brightness >= BZ_BRIGHTNESS_LEVELS) return false;
     for (int page = 0; page < BZ_PAGE_COUNT; ++page)
         for (int slot = 0; slot < BZ_MAX_SLOTS; ++slot)
             if (s.slots[page][slot] >= BZ_M_COUNT) return false;

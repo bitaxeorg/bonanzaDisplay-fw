@@ -85,7 +85,7 @@ flip, so they survive power cycles and firmware updates.
 
 | Page | Slots | Layout |
 | --- | --- | --- |
-| `HERO` | 5 | One big metric with a scrolling graph of its last ten minutes, four icon metrics, the stratum host, the network difficulty, WiFi signal bars, and the ASIC model |
+| `HERO` | 5 | One big metric with a scrolling graph of its last ten minutes; beside it a device line (host name, WiFi signal bars, ASIC model), four icon metrics, the stratum host, and the network difficulty |
 | `GRID` | 6 | Six equal metrics, three by two |
 | `DUO` | 2 | Two big metrics, each with a bar meter and a marker at its ten-minute peak |
 
@@ -96,11 +96,12 @@ the unit shown. Time when the host was away shows as a gap. Text metrics such
 as the pool or IP address have no graph; the space shows the host and its IP
 address instead.
 
-The four side metrics are a two-by-two block, each an icon followed by its
-value. One-letter units ride on the value (`58C`, `55.0W`); longer units are
-left to the icon. A value too long for the large font steps down to the small
-one, then to the tiny one. The metric picker shows the icon of the highlighted
-metric, so it doubles as the key to them.
+The big metric is in dot-matrix digits, with its name beside the top of them
+and its unit on their baseline. The four side metrics are a two-by-two block, each on one line: an icon, the
+value in the small font, and the unit in the tiny font (`58 C`, `4136 RPM`,
+`18.1 J/TH`). A value too long for that loses its unit, then drops to the tiny
+font itself. The metric picker shows the icon of the highlighted metric, so it
+doubles as the key to them.
 
 Under the block, two fixed lines show the stratum host (server icon) and the
 network difficulty (globe icon). They are not slots: they are always on the
@@ -108,16 +109,16 @@ network difficulty (globe icon). They are not slots: they are always on the
 The network difficulty reads `--` until the host reports it; see
 [Dashboard data and units](#dashboard-data-and-units).
 
+Above the block, the device line shows the host name and ends with the WiFi
+signal bars and the ASIC badge. Until the host reports its name the line
+shows the device family instead.
+
 The `DUO` bar meters auto-range to a round full scale above the highest value
 seen since power-up; temperatures use a fixed 0–100 scale.
 
-| `HERO` | `HERO` with dot-matrix digits |
-| --- | --- |
-| ![HERO page](docs/screens/hero.png) | ![HERO page with dot-matrix digits](docs/screens/hero-dot-matrix.png) |
-
-| `GRID` | `DUO` |
-| --- | --- |
-| ![GRID page](docs/screens/grid.png) | ![DUO page](docs/screens/duo.png) |
+| `HERO` | `GRID` | `DUO` |
+| --- | --- | --- |
+| ![HERO page](docs/screens/hero.png) | ![GRID page](docs/screens/grid.png) | ![DUO page](docs/screens/duo.png) |
 
 ### Setup menu
 
@@ -125,7 +126,6 @@ seen since power-up; temperatures use a fixed 0–100 scale.
 SETUP
 ├── LAYOUT       HERO / GRID / DUO             which page is shown
 ├── METRICS      one entry per slot of that page; each opens a metric picker
-├── BIG DIGITS   SOLID / DOT MATRIX            style of the large numbers
 ├── BRIGHTNESS   1 LOW .. 4 HIGH               panel contrast current
 ├── RESET ALL    asks first; restores the default pages and metrics
 └── EXIT
@@ -135,9 +135,9 @@ SETUP
 | --- | --- |
 | ![Setup menu](docs/screens/setup.png) | ![Metrics menu](docs/screens/metrics.png) |
 
-| Metric picker | Big digits picker |
-| --- | --- |
-| ![Metric picker](docs/screens/metric-picker.png) | ![Big digits picker](docs/screens/big-digits.png) |
+| Metric picker |
+| --- |
+| ![Metric picker](docs/screens/metric-picker.png) |
 
 Each page keeps its own metric choices. Any slot can show any of these, or be
 left empty:
@@ -381,11 +381,14 @@ partially parsed numeric values are rejected.
 | `wifi_rssi` | `-58` | `-58dBm`, and the signal bars on the `HERO` page |
 | `pool` | `public-pool.io` | Stratum host name |
 | `networkDifficulty` | `129.44T` | Host-formatted network difficulty string |
+| `hostname` | `bitaxe` | Host name on the `HERO` device line |
 
-`networkDifficulty` is not part of ESP-Miner's BAP today. The display reads it
-from the `systemInfo` response, which it requests every ten seconds, so a host
-only has to add one line beside `pool` there, sending its
-`network_diff_string`. Until it does, the display shows `--`.
+`networkDifficulty` and `hostname` are not part of ESP-Miner's BAP today. The
+display reads them from the `systemInfo` response, which it requests every ten
+seconds, so a host only has to add two lines beside `pool` there: its
+`network_diff_string` and its configured host name. Until it does, the
+display shows `--` for the difficulty and the device family for the name. The
+exact host change is written up in [`docs/host-bap-todo.md`](docs/host-bap-todo.md).
 
 These units follow the host implementation: hashrate is **GH/s**, and the
 `fan_speed` subscription reports **RPM**. A BAP `SET,fan_speed` command uses

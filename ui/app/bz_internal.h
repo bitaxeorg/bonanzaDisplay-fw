@@ -56,7 +56,7 @@ void bz_icon(int x, int y, bz_metric_t metric, int level);
 
 // ---- Mining pages -----------------------------------------------------------
 void bz_mining_draw(void);
-// Large value text in the user's digit style. Returns the x after the text.
+// Large value text in dot-matrix digits. Returns the x after the text.
 int bz_big_text(int x, int y, const char *text, int level);
 int bz_big_text_w(const char *text);
 // Page thumbnail for the setup menu; highlight is a slot index or -1.

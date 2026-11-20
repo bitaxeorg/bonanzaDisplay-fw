@@ -23,6 +23,7 @@ typedef enum {
 typedef struct {
     bz_link_t link;
     char family[32];
+    char hostname[33];  // The host's network name, if it reports one
     char asic[16];
     char ip[16];
     char best_diff[32];
@@ -97,12 +98,9 @@ typedef enum {
 #define BZ_MAX_SLOTS 6
 #define BZ_BRIGHTNESS_LEVELS 4
 
-typedef enum { BZ_DIGITS_SOLID, BZ_DIGITS_DOT_MATRIX, BZ_DIGITS_COUNT } bz_digits_t;
-
 typedef struct {
     uint8_t page;                              // bz_page_t shown while mining
     uint8_t slots[BZ_PAGE_COUNT][BZ_MAX_SLOTS]; // bz_metric_t per page slot
-    uint8_t digits;                            // bz_digits_t for big numbers
     uint8_t brightness;                        // 0..BZ_BRIGHTNESS_LEVELS-1
 } bz_settings_t;
 

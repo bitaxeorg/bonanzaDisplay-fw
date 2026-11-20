@@ -17,8 +17,9 @@
 //        tint:green|gray               colour of later images (default gray)
 //        pool:<host name>              stratum host the pretend host reports
 //        netdiff:on|off                whether the host reports network difficulty
+//        hostname:<name>|off           host name the pretend host reports, if any
 //        expect:boot|mining|menu       fail unless the UI is in that mode
-//        set:<page>:<digits>:<m,m,..>  store settings (metric ids) and power-cycle
+//        set:<page>:<m,m,..>           store settings (metric ids) and power-cycle
 //        reboot  status
 
 #include <stdio.h>
@@ -112,6 +113,7 @@ static double host_drift;
 // Off imitates a host whose BAP does not report network difficulty yet.
 static bool host_net_diff = true;
 static char host_pool[48] = "public-pool.io";
+static char host_hostname[33] = "bitaxe"; // Empty: a host that does not report one
 
 static double host_hashrate(void) {
     host_drift = host_drift * 0.985 + jitter(14);
@@ -158,6 +160,7 @@ static void host_receive(const char *sentence) {
         host_send("RES", "poolPort", "21496");
         host_send("RES", "poolUser", "bc1qexample.bonanza");
         if (host_net_diff) host_send("RES", "networkDifficulty", "129.44T");
+        if (*host_hostname) host_send("RES", "hostname", host_hostname);
     }
 }
 
@@ -338,12 +341,11 @@ int main(int argc, char **argv) {
         } else if (!strcmp(arg, "hold")) {
             press(900);
         } else if (!strncmp(arg, "set:", 4)) {
-            // set:<page>:<digits>:<m0,m1,...> stores settings, then power-cycles.
+            // set:<page>:<m0,m1,...> stores settings, then power-cycles.
             bz_settings_t s;
             bz_settings_defaults(&s);
             char *end;
             s.page = (uint8_t)strtoul(arg + 4, &end, 10);
-            s.digits = (uint8_t)strtoul(*end ? end + 1 : end, &end, 10);
             for (int slot = 0; *end && slot < BZ_MAX_SLOTS; ++slot)
                 s.slots[s.page][slot] = (uint8_t)strtoul(end + 1, &end, 10);
             bz_settings_encode(&s, stored_blob);
@@ -371,6 +373,8 @@ int main(int argc, char **argv) {
             image_tint = tint_green;
         } else if (!strcmp(arg, "tint:gray")) {
             image_tint = tint_gray;
+        } else if (!strncmp(arg, "hostname:", 9)) {
+            snprintf(host_hostname, sizeof(host_hostname), "%s", strcmp(arg + 9, "off") ? arg + 9 : "");
         } else if (!strncmp(arg, "pool:", 5)) {
             snprintf(host_pool, sizeof(host_pool), "%s", arg + 5);
         } else if (!strcmp(arg, "netdiff:on") || !strcmp(arg, "netdiff:off")) {
@@ -385,8 +389,8 @@ int main(int argc, char **argv) {
             if (strcmp(arg + 7, mode_name())) return fail(arg, mode_name());
         } else if (!strcmp(arg, "status")) {
             const bz_settings_t *s = bz_app_settings();
-            printf("t=%lu mode=%s page=%s digits=%d brightness=%d applied=%d saves=%u slots=",
-                   (unsigned long)now_ms, mode_name(), bz_page_name((bz_page_t)s->page), s->digits,
+            printf("t=%lu mode=%s page=%s brightness=%d applied=%d saves=%u slots=",
+                   (unsigned long)now_ms, mode_name(), bz_page_name((bz_page_t)s->page),
                    s->brightness, brightness, save_count);
             for (int j = 0; j < bz_page_slot_count((bz_page_t)s->page); ++j)
                 printf("%s%s", j ? "," : "", bz_metric_name((bz_metric_t)s->slots[s->page][j]));

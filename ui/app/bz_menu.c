@@ -12,12 +12,11 @@ typedef enum {
     PAGE_LAYOUT,      // Picker: which mining page
     PAGE_METRICS,     // The slots of the current mining page
     PAGE_PICK_METRIC, // Picker: metric for one slot
-    PAGE_DIGITS,      // Picker: big-number style
     PAGE_BRIGHTNESS,  // Picker
     PAGE_RESET,       // Confirm
 } page_t;
 
-enum { ROOT_LAYOUT, ROOT_METRICS, ROOT_DIGITS, ROOT_BRIGHTNESS, ROOT_RESET, ROOT_EXIT, ROOT_COUNT };
+enum { ROOT_LAYOUT, ROOT_METRICS, ROOT_BRIGHTNESS, ROOT_RESET, ROOT_EXIT, ROOT_COUNT };
 
 #define LIST_W 128
 #define ROWS 6
@@ -48,8 +47,7 @@ static bz_page_t mining_page(void) {
 }
 
 static bool is_picker(page_t page) {
-    return page == PAGE_LAYOUT || page == PAGE_PICK_METRIC || page == PAGE_DIGITS ||
-           page == PAGE_BRIGHTNESS;
+    return page == PAGE_LAYOUT || page == PAGE_PICK_METRIC || page == PAGE_BRIGHTNESS;
 }
 
 static int item_count(void) {
@@ -58,7 +56,6 @@ static int item_count(void) {
     case PAGE_LAYOUT: return BZ_PAGE_COUNT;
     case PAGE_METRICS: return 1 + bz_page_slot_count(mining_page());
     case PAGE_PICK_METRIC: return BZ_M_COUNT;
-    case PAGE_DIGITS: return BZ_DIGITS_COUNT;
     case PAGE_BRIGHTNESS: return BZ_BRIGHTNESS_LEVELS;
     default: return 2;
     }
@@ -69,7 +66,6 @@ static uint8_t *picker_target(void) {
     switch (m.page) {
     case PAGE_LAYOUT: return &bz.settings.page;
     case PAGE_PICK_METRIC: return &bz.settings.slots[mining_page()][m.slot];
-    case PAGE_DIGITS: return &bz.settings.digits;
     default: return &bz.settings.brightness;
     }
 }
@@ -95,7 +91,6 @@ void bz_menu_open(void) {
 }
 
 static void item_text(int index, char *label, size_t label_size, char *value, size_t value_size) {
-    static const char *const digits[] = {"SOLID", "DOT MATRIX"};
     static const char *const levels[] = {"1 LOW", "2", "3", "4 HIGH"};
     *value = '\0';
     switch (m.page) {
@@ -108,10 +103,6 @@ static void item_text(int index, char *label, size_t label_size, char *value, si
         case ROOT_METRICS:
             snprintf(label, label_size, "METRICS");
             snprintf(value, value_size, ">");
-            break;
-        case ROOT_DIGITS:
-            snprintf(label, label_size, "BIG DIGITS");
-            snprintf(value, value_size, "%s", bz.settings.digits ? "DOTS" : "SOLID");
             break;
         case ROOT_BRIGHTNESS:
             snprintf(label, label_size, "BRIGHTNESS");
@@ -132,7 +123,6 @@ static void item_text(int index, char *label, size_t label_size, char *value, si
         }
         break;
     case PAGE_PICK_METRIC: snprintf(label, label_size, "%s", bz_metric_name(metric_at(index))); break;
-    case PAGE_DIGITS: snprintf(label, label_size, "%s", digits[index]); break;
     case PAGE_BRIGHTNESS: snprintf(label, label_size, "%s", levels[index]); break;
     default: snprintf(label, label_size, "%s", index ? "YES, RESET" : "NO, KEEP"); break;
     }
@@ -152,7 +142,6 @@ static bool select_item(void) {
         switch (m.cursor) {
         case ROOT_LAYOUT: go(PAGE_LAYOUT, 0); break;
         case ROOT_METRICS: go(PAGE_METRICS, 1); break;
-        case ROOT_DIGITS: go(PAGE_DIGITS, 0); break;
         case ROOT_BRIGHTNESS: go(PAGE_BRIGHTNESS, 0); break;
         case ROOT_RESET: go(PAGE_RESET, 0); break;
         default: return false;
@@ -209,8 +198,7 @@ bool bz_menu_input(int steps, bz_press_t press) {
 // ---- Drawing --------------------------------------------------------------------
 
 static void draw_list(void) {
-    static const char *const titles[] = {"SETUP", "LAYOUT", "", "", "BIG DIGITS", "BRIGHTNESS",
-                                         "RESET ALL?"};
+    static const char *const titles[] = {"SETUP", "LAYOUT", "", "", "BRIGHTNESS", "RESET ALL?"};
     char title[24], label[20], value[16];
     if (m.page == PAGE_METRICS) {
         snprintf(title, sizeof(title), "%s METRICS", bz_page_name(mining_page()));
@@ -261,11 +249,6 @@ static void draw_preview(void) {
     bz_vdots(LIST_W + 2, 0, BZ_H, BZ_MID);
 
     switch (m.page) {
-    case PAGE_DIGITS:
-        bz_text(x + 3, 1, "BIG NUMBER STYLE", BZ_FONT_TINY, BZ_MID);
-        bz_big_text(x + 3, 12, "1.21", BZ_WHITE);
-        bz_text(x + 3 + bz_big_text_w("1.21") + 3, 25, "TH/s", BZ_FONT_LARGE, BZ_WHITE);
-        break;
     case PAGE_BRIGHTNESS:
         bz_text(x + 3, 1, "PANEL BRIGHTNESS", BZ_FONT_TINY, BZ_MID);
         for (int i = 0; i < BZ_BRIGHTNESS_LEVELS; ++i) {

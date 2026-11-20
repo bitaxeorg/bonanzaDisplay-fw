@@ -158,7 +158,6 @@ static void test_settings_blob(void) {
     uint8_t blob[BZ_SETTINGS_BLOB_SIZE];
     bz_settings_defaults(&a);
     a.page = BZ_PAGE_DUO;
-    a.digits = BZ_DIGITS_DOT_MATRIX;
     a.brightness = 1;
     a.slots[BZ_PAGE_DUO][1] = BZ_M_POOL;
     bz_settings_encode(&a, blob);
@@ -190,7 +189,13 @@ static void test_settings_blob(void) {
     for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
     assert(bz_settings_decode(blob, &b));
     assert(b.page == BZ_PAGE_HERO && b.slots[BZ_PAGE_HERO][0] == BZ_M_POOL);
-    assert(b.slots[BZ_PAGE_DUO][1] == BZ_M_POOL && b.digits == BZ_DIGITS_DOT_MATRIX);
+    assert(b.slots[BZ_PAGE_DUO][1] == BZ_M_POOL);
+    // Byte 7 once chose between two big-digit styles; either value still loads.
+    blob[6] = BZ_PAGE_DUO;
+    blob[7] = 1;
+    crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
+    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
+    assert(bz_settings_decode(blob, &b) && b.page == BZ_PAGE_DUO);
     blob[6] = 4; // Never a valid page
     crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
     for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
@@ -307,12 +312,7 @@ static void test_menu_other_settings(void) {
     turn(1);  // HERO -> GRID
     click();
     assert(s->page == BZ_PAGE_GRID);
-    turn(2);  // BIG DIGITS
-    click();
-    turn(1);
-    click();
-    assert(s->digits == BZ_DIGITS_DOT_MATRIX);
-    turn(1);  // BRIGHTNESS
+    turn(2);  // BRIGHTNESS
     click();
     turn(-3);
     assert(s->brightness == 0 && last_brightness == 0); // Applied while turning
@@ -340,10 +340,10 @@ static void test_menu_other_settings(void) {
     hold();    // Back to SETUP
 
     // RESET ALL asks first.
-    turn(3);
+    turn(2);
     click();
     click(); // NO, KEEP
-    assert(s->page == BZ_PAGE_DUO && s->digits == BZ_DIGITS_DOT_MATRIX);
+    assert(s->page == BZ_PAGE_DUO);
     click();
     turn(1);
     click(); // YES, RESET
@@ -425,45 +425,64 @@ static void test_icons_and_hero_info(void) {
     boot_to_mining(1000);
     assert(bz_app_settings()->page == BZ_PAGE_HERO);
     // Text of the two info lines, right of their icons.
-    unsigned pool_line = lit_in(161, 40, 255, 48), net_line = lit_in(161, 53, 255, 61);
+    unsigned pool_line = lit_in(161, 42, 255, 50), net_line = lit_in(161, 53, 255, 61);
     assert(pool_line > 40 && net_line > 40);
     // A host that does not report network difficulty leaves a placeholder.
     data.net_diff[0] = '\0';
     bz_app_set_data(&data);
     run(100);
     unsigned placeholder = lit_in(161, 53, 255, 61);
-    assert(lit_in(161, 40, 255, 48) == pool_line && placeholder > 0 && placeholder < net_line);
+    assert(lit_in(161, 42, 255, 50) == pool_line && placeholder > 0 && placeholder < net_line);
+    // WiFi bars and the ASIC badge end the device line at the top; the hero
+    // zone has nothing above its graph but the value, its name and its unit.
+    unsigned status = lit_in(210, 0, 255, 8);
+    assert(status > 60 && lit_in(133, 0, 141, 33) == 0);
+    // The device line shows the family name until the host reports its own.
+    static uint8_t family_frame[BZ_W * BZ_H];
+    memcpy(family_frame, bz_fb, sizeof(family_frame));
+    unsigned name = lit_in(149, 0, 205, 8);
+    assert(name > 20);
+    snprintf(data.hostname, sizeof(data.hostname), "bitaxe-shop");
+    bz_app_set_data(&data);
+    run(100);
+    assert(lit_in(149, 0, 205, 8) > name && lit_in(210, 0, 255, 8) == status);
+    data.hostname[0] = '\0';
+    bz_app_set_data(&data);
+    run(100);
+    assert(!memcmp(&family_frame[0], &bz_fb[0], BZ_W * 9));
+    data.asic[0] = '\0';
+    data.rssi_dbm = BZ_RSSI_UNKNOWN;
+    bz_app_set_data(&data);
+    run(100);
+    assert(lit_in(210, 0, 255, 8) < status);
 }
 
-// Every page with every metric in every slot, in both digit styles: exercises
-// the drawing code under the sanitizers.
+// Every page with every metric in every slot: exercises the drawing code
+// under the sanitizers.
 static void test_draw_everything(void) {
-    for (int digits = 0; digits < BZ_DIGITS_COUNT; ++digits) {
-        for (int page = 0; page < BZ_PAGE_COUNT; ++page) {
-            for (int metric = 0; metric < BZ_M_COUNT; ++metric) {
-                bz_settings_t s;
-                bz_settings_defaults(&s);
-                s.page = (uint8_t)page;
-                s.digits = (uint8_t)digits;
-                for (int slot = 0; slot < BZ_MAX_SLOTS; ++slot)
-                    s.slots[page][slot] = (uint8_t)((metric + slot) % BZ_M_COUNT);
-                bz_settings_encode(&s, flash);
-                flash_valid = true;
-                boot_to_mining(1000);
-                // Long strings and large numbers.
-                snprintf(data.pool, sizeof(data.pool), "stratum.a-very-long-pool-hostname.example.org");
-                snprintf(data.best_diff, sizeof(data.best_diff), "1234567890.12345T");
-                data.hashrate_ghs = metric % 2 ? 4000000000u : 7;
-                data.fan_rpm = 4000000000u;
-                data.power_mw = 4000000000u;
-                bz_app_set_data(&data);
-                run(1500);
-                click(); // And the menu preview for that arrangement.
-                turn(1);
-                click();
-                turn(2);
-                run(100);
-            }
+    for (int page = 0; page < BZ_PAGE_COUNT; ++page) {
+        for (int metric = 0; metric < BZ_M_COUNT; ++metric) {
+            bz_settings_t s;
+            bz_settings_defaults(&s);
+            s.page = (uint8_t)page;
+            for (int slot = 0; slot < BZ_MAX_SLOTS; ++slot)
+                s.slots[page][slot] = (uint8_t)((metric + slot) % BZ_M_COUNT);
+            bz_settings_encode(&s, flash);
+            flash_valid = true;
+            boot_to_mining(1000);
+            // Long strings and large numbers.
+            snprintf(data.pool, sizeof(data.pool), "stratum.a-very-long-pool-hostname.example.org");
+            snprintf(data.best_diff, sizeof(data.best_diff), "1234567890.12345T");
+            data.hashrate_ghs = metric % 2 ? 4000000000u : 7;
+            data.fan_rpm = 4000000000u;
+            data.power_mw = 4000000000u;
+            bz_app_set_data(&data);
+            run(1500);
+            click(); // And the menu preview for that arrangement.
+            turn(1);
+            click();
+            turn(2);
+            run(100);
         }
     }
 }
