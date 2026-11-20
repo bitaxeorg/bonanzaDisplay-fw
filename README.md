@@ -33,13 +33,18 @@ perform the hardware-timed transfer.
 ## Using the display
 
 The screenshots in this README come from the [simulator](#simulator), enlarged
-four times and tinted like the green panel. Each is the full 256×64 display.
+four times, tinted like the green panel, and with each gray level drawn as
+bright as it looks on the panel. Each is the full 256×64 display.
 
 | Mode | When | What it shows |
 | --- | --- | --- |
-| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, enters WiFi setup, or stops responding | Bitaxe logo, a typed-out start-up log that follows the real BAP link, and a checkered progress bar along the bottom |
+| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, enters WiFi setup, or stops responding | A twinkling Bitaxe logo, a typed-out start-up log that follows the real BAP link, and a checkered progress bar along the bottom |
 | **Mining** | While the host is connected | One of three pages of live metrics |
 | **Setup** | After pushing the dial | Menus on the left, a live preview of the result on the right |
+
+The logo shimmers while this screen is up: it rests dim, a band of brightness
+drifts through it, and individual pixels flare to full white and fade, each on
+its own schedule and lighting their neighbours as they go.
 
 The start-up log reads, in order:
 
@@ -80,12 +85,31 @@ flip, so they survive power cycles and firmware updates.
 
 | Page | Slots | Layout |
 | --- | --- | --- |
-| `HERO` | 5 | One big metric with a twin bar meter (the value now and its five-minute average, with a marker at the ten-minute peak), plus four side metrics, WiFi signal bars, and the ASIC model |
+| `HERO` | 5 | One big metric with a scrolling graph of its last ten minutes, four icon metrics, the stratum host, the network difficulty, WiFi signal bars, and the ASIC model |
 | `GRID` | 6 | Six equal metrics, three by two |
-| `DUO` | 2 | Two big metrics, each with a bar meter |
+| `DUO` | 2 | Two big metrics, each with a bar meter and a marker at its ten-minute peak |
 
-Bar meters auto-range to a round full scale above the highest value seen
-since power-up; temperatures use a fixed 0–100 scale.
+The `HERO` graph scrolls from right to left, one column every five seconds,
+with the live value in the last column. Its vertical scale fits the values in
+view, and the two numbers beside it are the top and bottom of that scale in
+the unit shown. Time when the host was away shows as a gap. Text metrics such
+as the pool or IP address have no graph; the space shows the host and its IP
+address instead.
+
+The four side metrics are a two-by-two block, each an icon followed by its
+value. One-letter units ride on the value (`58C`, `55.0W`); longer units are
+left to the icon. A value too long for the large font steps down to the small
+one, then to the tiny one. The metric picker shows the icon of the highlighted
+metric, so it doubles as the key to them.
+
+Under the block, two fixed lines show the stratum host (server icon) and the
+network difficulty (globe icon). They are not slots: they are always on the
+`HERO` page. A host name longer than 15 characters is shown in the tiny font.
+The network difficulty reads `--` until the host reports it; see
+[Dashboard data and units](#dashboard-data-and-units).
+
+The `DUO` bar meters auto-range to a round full scale above the highest value
+seen since power-up; temperatures use a fixed 0–100 scale.
 
 | `HERO` | `HERO` with dot-matrix digits |
 | --- | --- |
@@ -132,6 +156,7 @@ left empty:
 | WiFi signal | `-58 dBm` | `wifi_rssi` |
 | IP address, Pool, ASIC model | text | `wifi_ip`, `pool`, `asicModel` |
 | Frequency | `-- MHz` until a host reports it | `frequency` |
+| Network diff | `129.44T`, or `--` until a host reports it | `networkDifficulty` |
 
 ## Hardware
 
@@ -354,7 +379,13 @@ partially parsed numeric values are rejected.
 | `shares` | `1532/4` | Accepted and rejected counts, as two metrics |
 | `block_height` | `921034` | Block height |
 | `wifi_rssi` | `-58` | `-58dBm`, and the signal bars on the `HERO` page |
-| `pool` | `public-pool.io` | Pool host name |
+| `pool` | `public-pool.io` | Stratum host name |
+| `networkDifficulty` | `129.44T` | Host-formatted network difficulty string |
+
+`networkDifficulty` is not part of ESP-Miner's BAP today. The display reads it
+from the `systemInfo` response, which it requests every ten seconds, so a host
+only has to add one line beside `pool` there, sending its
+`network_diff_string`. Until it does, the display shows `--`.
 
 These units follow the host implementation: hashrate is **GH/s**, and the
 `fan_speed` subscription reports **RPM**. A BAP `SET,fan_speed` command uses
@@ -607,12 +638,13 @@ bonanzaDisplay/
 │   │   ├── main_screen.xml     # Earlier editor dashboard; no longer shown
 │   │   └── main_screen_gen.c   # Its editor-generated source
 │   ├── app/                    # Retro UI: plain C, no LVGL or Pico SDK
-│   │   ├── bz_app.c            # Modes, dial input, settings, meter statistics
+│   │   ├── bz_app.c            # Modes, dial input, settings, metric history
 │   │   ├── bz_boot.c           # Loading screen
-│   │   ├── bz_mining.c         # HERO, GRID and DUO pages and bar meters
+│   │   ├── bz_mining.c         # HERO, GRID and DUO pages, graph and bar meters
 │   │   ├── bz_menu.c           # Setup menu
 │   │   ├── bz_model.c          # Metric catalogue and settings blob
 │   │   ├── bz_gfx.c            # Framebuffer drawing and bitmap text
+│   │   ├── bz_icons.c          # 9x9 metric icons, drawn as text in the source
 │   │   └── bz_assets_data.c    # Generated fixed-cell fonts and logo
 │   ├── bonanza_ui.c            # LVGL glue: shows the retro UI framebuffer
 │   ├── bonanza_ui_gen.c        # Editor-generated subjects/assets setup

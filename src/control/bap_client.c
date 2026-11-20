@@ -157,6 +157,9 @@ static void handle_sentence(bonanza_bap_client_t *client, uint32_t now_ms) {
         snprintf(m->best_share, sizeof(m->best_share), "%s", value);
     } else if (!strcmp(parameter, "pool") && *value) {
         snprintf(m->pool, sizeof(m->pool), "%s", value);
+    } else if (!strcmp(parameter, "networkDifficulty") && *value) {
+        // Sent with systemInfo by hosts that have it; older hosts leave it out.
+        snprintf(m->network_difficulty, sizeof(m->network_difficulty), "%s", value);
     } else if (!strcmp(parameter, "shares")) {
         recognized = read_shares(value, &m->shares_accepted, &m->shares_rejected);
     } else if (!strcmp(parameter, "wifi_rssi")) {

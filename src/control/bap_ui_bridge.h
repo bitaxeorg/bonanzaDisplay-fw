@@ -21,6 +21,7 @@ static inline void bonanza_ui_data_from_metrics(const bonanza_metrics_t *m, bz_d
     if (m->ip_address[0] != '-') snprintf(d->ip, sizeof(d->ip), "%s", m->ip_address);
     if (m->best_share[0] != '-') snprintf(d->best_diff, sizeof(d->best_diff), "%s", m->best_share);
     snprintf(d->pool, sizeof(d->pool), "%s", m->pool);
+    snprintf(d->net_diff, sizeof(d->net_diff), "%s", m->network_difficulty);
     // Both sides mark unknown numbers with UINT32_MAX / INT32_MIN.
     d->hashrate_ghs = m->hashrate_ghs;
     d->chip_temp_c = m->temperature_c;

@@ -88,20 +88,102 @@ static void draw_bar(int x, int y, int w, int h, float value, float peak, const 
     if (mark > fill + 1) bz_vline(x + mark - 1, y + 1, h - 2, BZ_WHITE);
 }
 
-// Scale numbers with tick marks under them, spanning x .. x+w-1.
-static void draw_scale(int x, int y, int w, const scale_t *s, int label_level) {
+// ---- History graph ----------------------------------------------------------------
+
+// Rounds a positive span up to 1, 2 or 5 times a power of ten, no finer than
+// 0.01, and reports how many decimals a multiple of it needs.
+static float nice_step(float raw, int *decimals) {
+    float step = 1;
+    while (step > raw && step > 0.01f) step /= 10;
+    while (step * 10 <= raw) step *= 10;
+    float mantissa = raw / step;
+    step *= mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10;
+    *decimals = step >= 1 ? 0 : step >= 0.1f ? 1 : 2;
+    return step;
+}
+
+static void graph_label(char *out, size_t size, long multiple, float step, int decimals) {
+    // Work in whole hundredths so labels never show float rounding noise.
+    long hundredths = multiple * (long)(step * 100 + 0.5f);
+    if (decimals == 0) snprintf(out, size, "%ld", hundredths / 100);
+    else if (decimals == 1) snprintf(out, size, "%ld.%ld", hundredths / 100, hundredths % 100 / 10);
+    else snprintf(out, size, "%ld.%02ld", hundredths / 100, hundredths % 100);
+}
+
+// Scrolling area graph of the last ten minutes: newest on the right, one
+// column per history point, with the live value in the last column. The
+// vertical scale fits the data in view, and its ends are labelled.
+static void draw_graph(int x, int y, int w, int h, bz_metric_t metric, const bz_reading_t *r) {
+    const int bottom = y + h - 1;
+    bz_hdots(x, bottom + 1, w + 1, BZ_WHITE);
+    bz_vline(x + w, y, h + 1, BZ_WHITE);
+    bz_text(x + w + 3, y + h / 2 - 2, "10M", BZ_FONT_TINY, BZ_DIM);
+
+    // Column c shows the point (w - 1 - c) steps back; the last is live.
+    float lo = 0, hi = 0;
+    bool any = false;
+    for (int c = 0; c < w; ++c) {
+        float v = c == w - 1 ? (r->valid ? r->number : BZ_GRAPH_GAP) : bz_stat_point(metric, w - 2 - c);
+        if (v < 0) continue;
+        if (!any || v < lo) lo = v;
+        if (!any || v > hi) hi = v;
+        any = true;
+    }
+    if (!any) return;
+
+    // Keep a nearly flat trace from filling the plot with noise, then round
+    // the scale outward to steps that label cleanly in the unit shown.
+    float div = r->unit_div;
+    float floor_span = hi * 0.02f > div * 0.02f ? hi * 0.02f : div * 0.02f;
+    if (hi - lo < floor_span) {
+        float mid = (hi + lo) / 2;
+        lo = mid - floor_span / 2;
+        hi = mid + floor_span / 2;
+        if (lo < 0) lo = 0;
+    }
+    int decimals;
+    float step = nice_step((hi - lo) / div / 3, &decimals);
+    long lo_multiple = (long)(lo / div / step + 0.001f);
+    long hi_multiple = (long)(hi / div / step - 0.001f) + 1;
+    if (hi_multiple <= lo_multiple) hi_multiple = lo_multiple + 1;
+    lo = (float)lo_multiple * step * div;
+    hi = (float)hi_multiple * step * div;
+
     char text[12];
-    for (int i = 0; i <= 4; ++i) {
-        int tx = x + i * (w - 1) / 4;
-        scale_label(text, sizeof(text), s, i);
-        if (i == 0) bz_text(tx, y, text, BZ_FONT_TINY, label_level);
-        else if (i == 4) bz_text_right(tx + 1, y, text, BZ_FONT_TINY, label_level);
-        else bz_text_center(tx + 1, y, text, BZ_FONT_TINY, label_level);
-        bz_vline(tx, y + 6, 3, BZ_WHITE);
+    graph_label(text, sizeof(text), hi_multiple, step, decimals);
+    bz_text(x + w + 3, y, text, BZ_FONT_TINY, BZ_MID);
+    graph_label(text, sizeof(text), lo_multiple, step, decimals);
+    bz_text(x + w + 3, bottom - 4, text, BZ_FONT_TINY, BZ_MID);
+
+    int previous = -1;
+    for (int c = 0; c < w; ++c) {
+        float v = c == w - 1 ? (r->valid ? r->number : BZ_GRAPH_GAP) : bz_stat_point(metric, w - 2 - c);
+        if (v < 0) {
+            previous = -1; // Break the trace across a gap
+            continue;
+        }
+        int py = bottom - (int)((v - lo) / (hi - lo) * (float)(h - 1) + 0.5f);
+        if (py < y) py = y;
+        if (py > bottom) py = bottom;
+        bz_dither(x + c, py + 1, 1, bottom - py, BZ_DIM + 1, 0);
+        // Join to the previous column so steep changes stay one line.
+        int from = previous < 0 ? py : previous < py ? previous + 1 : previous > py ? previous - 1 : py;
+        if (from < py) bz_vline(x + c, from, py - from + 1, BZ_WHITE);
+        else bz_vline(x + c, py, from - py + 1, BZ_WHITE);
+        previous = py;
     }
 }
 
 // ---- HERO page --------------------------------------------------------------------
+
+// The page is split by a dotted line: the hero metric and its graph on the
+// left, and on the right four icon metrics over the stratum host and the
+// network difficulty.
+#define HERO_MAIN_W 142   // Hero zone is x 0..141
+#define HERO_SPLIT_X 145
+#define HERO_SIDE_X 149   // Side zone is x 149..255
+#define HERO_CELL_W 52
+#define HERO_CELL_PITCH 55
 
 static void draw_wifi_bars(int x, int y) {
     int lit = 0;
@@ -116,100 +198,124 @@ static void draw_wifi_bars(int x, int y) {
     }
 }
 
+static int badge_w(const char *text) {
+    return bz_text_w(text, BZ_FONT_TINY, 1) + 3;
+}
+
 static void draw_badge_right(int right, int y, const char *text) {
-    int w = bz_text_w(text, BZ_FONT_TINY, 1) + 3;
+    int w = badge_w(text);
     bz_fill(right - w + 1, y, w, 7, BZ_WHITE);
     bz_text(right - w + 3, y + 1, text, BZ_FONT_TINY, BZ_BLACK);
 }
 
 static void draw_info_row(int y, const char *label, const char *value) {
-    char text[25];
     bz_text(0, y, label, BZ_FONT_SMALL, BZ_DIM);
-    snprintf(text, sizeof(text), "%s", *value ? value : "--");
-    bz_text(30, y, text, BZ_FONT_SMALL, BZ_WHITE);
+    bz_clip(0, y, HERO_MAIN_W, 8);
+    bz_text(30, y, *value ? value : "--", BZ_FONT_SMALL, BZ_WHITE);
+    bz_clip_reset();
 }
 
 static void draw_hero_main(bz_metric_t metric) {
-    const int zone_w = 174;
     bz_reading_t r;
     bz_metric_read(metric, &bz.data, &r);
 
-    // Link status cluster, top right of the zone.
-    draw_wifi_bars(163, 0);
-    if (*bz.data.asic) draw_badge_right(173, 11, bz.data.asic);
+    // Link status cluster in the top right corner of the zone: WiFi bars over
+    // the ASIC badge. A wide hero value takes the badge's place.
+    const int right = HERO_MAIN_W - 1;
+    int badge_left = *bz.data.asic ? right - badge_w(bz.data.asic) + 1 : HERO_MAIN_W;
+    draw_wifi_bars(right - 10, 0);
 
     if (metric == BZ_M_NONE) {
         bz_bitmap(0, 1, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_WHITE);
     } else if (bz_big_text_w(r.value) <= 108) {
         int x = bz_big_text(0, 0, r.value, BZ_WHITE) + 4;
         const char *name = bz_metric_name(metric);
-        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) > 158) name = bz_metric_short(metric);
-        bz_text(x, 2, name, BZ_FONT_SMALL, BZ_MID);
-        bz_text(x, BIG_FOOT - 13, r.unit, BZ_FONT_LARGE, BZ_WHITE);
+        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) > right - 12) name = bz_metric_short(metric);
+        if (x + bz_text_w(name, BZ_FONT_SMALL, 1) <= right - 12)
+            bz_text(x, 2, name, BZ_FONT_SMALL, BZ_MID);
+        int unit_end = x + bz_text_w(r.unit, BZ_FONT_LARGE, 1);
+        if (unit_end <= HERO_MAIN_W) {
+            bz_text(x, BIG_FOOT - 13, r.unit, BZ_FONT_LARGE, BZ_WHITE);
+        } else {
+            unit_end = x + bz_text_w(r.unit, BZ_FONT_SMALL, 1);
+            bz_text(x, BIG_FOOT - 8, r.unit, BZ_FONT_SMALL, BZ_WHITE);
+        }
+        if (*r.unit && unit_end > badge_left - 2) badge_left = HERO_MAIN_W;
     } else {
         // Long text such as an address: one normal-height line.
         bz_text(0, 0, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
-        bz_clip(0, 0, 144, BZ_H);
-        bz_text(0, 12, r.value, BZ_FONT_LARGE, BZ_WHITE);
+        bz_clip(0, 0, HERO_MAIN_W, BZ_H);
+        bz_text(0, 18, r.value, BZ_FONT_LARGE, BZ_WHITE);
         bz_clip_reset();
     }
+    if (*bz.data.asic && badge_left < HERO_MAIN_W) draw_badge_right(right, 11, bz.data.asic);
 
     if (!r.gauge) {
-        // Nothing to meter: use the space for who and where this miner is.
+        // Nothing to graph: use the space for who and where this miner is.
         char device[40];
         snprintf(device, sizeof(device), "%s %s", bz.data.family, bz.data.asic);
-        draw_info_row(36, "HOST", device);
-        draw_info_row(46, "POOL", bz.data.pool);
-        draw_info_row(56, "IP", bz.data.ip);
+        draw_info_row(42, "HOST", device);
+        draw_info_row(54, "IP", bz.data.ip);
         return;
     }
 
-    // Twin bar meter: the value now and its running average on one scale,
-    // with a marker at the recent peak.
-    const int bar_x = 17, bar_w = 155;
-    scale_t s = meter_scale(metric, &r);
-    draw_scale(bar_x, 33, bar_w, &s, BZ_MID);
-    bz_vline(15, 39, 25, BZ_WHITE);
-    bz_vline(zone_w - 1, 39, 25, BZ_WHITE);
-    bz_hdots(16, 42, bar_w + 2, BZ_WHITE);
-    bz_hdots(16, 63, bar_w + 2, BZ_WHITE);
-    bz_text(1, 45, "NOW", BZ_FONT_TINY, BZ_WHITE);
-    bz_text(1, 55, "AVG", BZ_FONT_TINY, BZ_WHITE);
-    const bz_stat_t *stat = &bz.stats[metric];
-    float peak = bz_stat_peak(metric);
-    draw_bar(bar_x, 44, bar_w, 8, r.valid ? r.number : 0, peak, &s);
-    draw_bar(bar_x, 54, bar_w, 8, stat->samples && r.valid ? stat->average : 0, 0, &s);
+    draw_graph(0, 35, BZ_GRAPH_POINTS + 1, 28, metric, &r);
 }
 
-// Side slot: name and unit stacked on the left, value on the right.
-static void draw_side_slot(int x, int y, int w, bz_metric_t metric) {
+// Side cell: the metric's icon with its value straight after it. The value
+// steps down a font when it is too long, so nothing is cut short without
+// first trying a smaller size.
+static void draw_side_cell(int x, int y, bz_metric_t metric) {
     if (metric == BZ_M_NONE) return;
     bz_reading_t r;
     bz_metric_read(metric, &bz.data, &r);
-    int right = x + w - 1;
-    size_t n = strlen(r.value);
-    bz_text(x, y + 1, bz_metric_short(metric), BZ_FONT_SMALL, BZ_MID);
-    if (n + strlen(r.unit) <= 5) {
-        // Short units ride on the value: "58C", "17.6W".
-        char joined[12];
-        snprintf(joined, sizeof(joined), "%s%s", r.value, r.unit);
-        bz_text_right(right, y + 1, joined, BZ_FONT_LARGE, BZ_WHITE);
-    } else if (n <= 6) {
-        bz_text(x, y + 10, r.unit, BZ_FONT_TINY, BZ_MID);
-        bz_text_right(right, y + 1, r.value, BZ_FONT_LARGE, BZ_WHITE);
-    } else if (n <= (size_t)(w / 6)) {
-        bz_text_right(right, y + 8, r.value, BZ_FONT_SMALL, BZ_WHITE);
-    } else {
+    const int w = HERO_CELL_W;
+    const int text_x = x + BZ_ICON_SIZE + 3, room = w - BZ_ICON_SIZE - 3;
+    int small_w = bz_text_w(r.value, BZ_FONT_SMALL, 1);
+    // Too long even for the small font: the tiny font, on the full width
+    // under a raised icon.
+    bool tiny = small_w > room + 2;
+    bz_icon(x, tiny ? y : y + 3, metric, BZ_WHITE);
+
+    char joined[sizeof(r.value) + sizeof(r.unit)];
+    snprintf(joined, sizeof(joined), "%s%s", r.value, r.unit);
+    if (tiny) {
         bz_clip(x, y, w, 16);
-        bz_text_right(right, y + 10, r.value, BZ_FONT_TINY, BZ_WHITE);
+        bz_text(x, y + 11, r.value, BZ_FONT_TINY, BZ_WHITE);
+        bz_clip_reset();
+    } else if (*r.unit && bz_text_w(joined, BZ_FONT_LARGE, 1) <= room) {
+        // Short units ride on the value: "58C", "55.0W".
+        bz_text(text_x, y + 1, joined, BZ_FONT_LARGE, BZ_WHITE);
+    } else if (bz_text_w(r.value, BZ_FONT_LARGE, 1) <= room) {
+        bz_text(text_x, y + 1, r.value, BZ_FONT_LARGE, BZ_WHITE);
+    } else {
+        bz_text(small_w > room ? text_x - 2 : text_x, y + 4, r.value, BZ_FONT_SMALL, BZ_WHITE);
+    }
+}
+
+// Info line: icon, then text in the small font, or the tiny font when the
+// small one would not fit.
+static void draw_info_line(int y, bz_metric_t metric, const char *text) {
+    const int x = HERO_SIDE_X + BZ_ICON_SIZE + 3, room = BZ_W - x;
+    bz_icon(HERO_SIDE_X, y, metric, BZ_WHITE);
+    if (!*text) text = "--";
+    if (bz_text_w(text, BZ_FONT_SMALL, 1) <= room) {
+        bz_text(x, y + 1, text, BZ_FONT_SMALL, BZ_WHITE);
+    } else {
+        bz_clip(x, y, room, BZ_ICON_SIZE);
+        bz_text(x, y + 2, text, BZ_FONT_TINY, BZ_WHITE);
         bz_clip_reset();
     }
 }
 
 static void draw_hero(const uint8_t *slots) {
     draw_hero_main((bz_metric_t)slots[0]);
-    bz_vdots(177, 0, BZ_H, BZ_MID);
-    for (int i = 0; i < 4; ++i) draw_side_slot(181, i * 16, 75, (bz_metric_t)slots[1 + i]);
+    bz_vdots(HERO_SPLIT_X, 0, BZ_H, BZ_MID);
+    for (int i = 0; i < 4; ++i)
+        draw_side_cell(HERO_SIDE_X + (i % 2) * HERO_CELL_PITCH, (i / 2) * 17, (bz_metric_t)slots[1 + i]);
+    bz_hdots(HERO_SIDE_X, 36, BZ_W - HERO_SIDE_X, BZ_MID);
+    draw_info_line(40, BZ_M_POOL, bz.data.pool);
+    draw_info_line(53, BZ_M_NET_DIFF, bz.data.net_diff);
 }
 
 // ---- GRID page --------------------------------------------------------------------
@@ -300,14 +406,19 @@ void bz_mining_draw(void) {
 // Thumbnail in a 121x33 box: one outlined cell per slot, labelled with the
 // metric it shows. Neighbouring cells share a border.
 void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on) {
-    static const uint8_t hero[5][4] = {{0, 0, 80, 32}, {80, 0, 40, 8}, {80, 8, 40, 8},
-                                       {80, 16, 40, 8}, {80, 24, 40, 8}};
+    static const uint8_t hero[5][4] = {{0, 0, 66, 32}, {66, 0, 27, 10}, {93, 0, 27, 10},
+                                       {66, 10, 27, 10}, {93, 10, 27, 10}};
     static const uint8_t grid[6][4] = {{0, 0, 40, 16}, {40, 0, 40, 16}, {80, 0, 40, 16},
                                        {0, 16, 40, 16}, {40, 16, 40, 16}, {80, 16, 40, 16}};
     static const uint8_t duo[2][4] = {{0, 0, 60, 32}, {60, 0, 60, 32}};
     bz_page_t page = (bz_page_t)bz.settings.page;
     const uint8_t (*cells)[4] = page == BZ_PAGE_HERO ? hero : page == BZ_PAGE_GRID ? grid : duo;
     int count = bz_page_slot_count(page);
+    if (page == BZ_PAGE_HERO) {
+        // The fixed stratum host and network difficulty lines.
+        bz_rect(x + 66, y + 20, 55, 13, BZ_MID);
+        bz_text_center(x + 94, y + 24, "POOL+NET", BZ_FONT_TINY, BZ_DIM);
+    }
     for (int i = 0; i < count; ++i) {
         int cx = x + cells[i][0], cy = y + cells[i][1], cw = cells[i][2], ch = cells[i][3];
         bz_rect(cx, cy, cw + 1, ch + 1, BZ_MID);

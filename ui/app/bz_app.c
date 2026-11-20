@@ -6,8 +6,6 @@
 #define MENU_IDLE_MS 30000u   // Leave an untouched menu
 #define SAVE_DELAY_MS 3000u   // Batch page flips into one flash write
 #define STAT_PERIOD_MS 1000u
-#define STAT_BUCKET_SAMPLES 10u // 60 buckets of 10 s: a ten minute peak window
-#define AVERAGE_SAMPLES 300u    // About five minutes
 #define TOAST_MS 1200u
 
 bz_state_t bz;
@@ -35,37 +33,43 @@ static struct {
     uint8_t shadow[BZ_W * BZ_H];
 } app;
 
-// ---- Statistics for the bar meters --------------------------------------------
+// ---- History for the graph and bar meters --------------------------------------
 
 static void stats_sample(void) {
-    bool close_bucket = ++app.bucket_samples >= STAT_BUCKET_SAMPLES;
-    if (close_bucket) app.bucket_samples = 0;
+    bool close_point = ++app.bucket_samples >= BZ_GRAPH_STEP_S;
+    if (close_point) app.bucket_samples = 0;
     for (int metric = 1; metric < BZ_M_COUNT; ++metric) {
         bz_reading_t reading;
         bz_metric_read((bz_metric_t)metric, &bz.data, &reading);
         bz_stat_t *stat = &bz.stats[metric];
         if (reading.gauge && reading.valid) {
-            float v = reading.number;
-            // A plain mean at first, settling into a running average.
-            if (stat->samples < AVERAGE_SAMPLES) stat->samples++;
-            stat->average += (v - stat->average) / (float)stat->samples;
-            if (v > stat->session_max) stat->session_max = v;
-            if (v > stat->bucket_max) stat->bucket_max = v;
+            if (reading.number > stat->session_max) stat->session_max = reading.number;
+            stat->bucket_sum += reading.number;
+            stat->bucket_count++;
         }
-        if (close_bucket) {
-            stat->history[stat->history_head] = stat->bucket_max;
-            stat->history_head = (uint8_t)((stat->history_head + 1u) % 60u);
-            if (stat->history_count < 60u) stat->history_count++;
-            stat->bucket_max = 0;
+        if (close_point) {
+            stat->graph[stat->graph_head] =
+                stat->bucket_count ? stat->bucket_sum / (float)stat->bucket_count : BZ_GRAPH_GAP;
+            stat->graph_head = (uint8_t)((stat->graph_head + 1u) % BZ_GRAPH_POINTS);
+            if (stat->graph_count < BZ_GRAPH_POINTS) stat->graph_count++;
+            stat->bucket_sum = 0;
+            stat->bucket_count = 0;
         }
     }
 }
 
-float bz_stat_peak(bz_metric_t metric) {
+float bz_stat_point(bz_metric_t metric, int age) {
     const bz_stat_t *stat = &bz.stats[metric];
-    float peak = stat->bucket_max;
-    for (unsigned i = 0; i < stat->history_count; ++i)
-        if (stat->history[i] > peak) peak = stat->history[i];
+    if (age < 0 || age >= stat->graph_count) return BZ_GRAPH_GAP;
+    return stat->graph[(stat->graph_head + BZ_GRAPH_POINTS - 1 - age) % BZ_GRAPH_POINTS];
+}
+
+float bz_stat_peak(bz_metric_t metric) {
+    float peak = 0;
+    for (int age = 0; age < bz.stats[metric].graph_count; ++age) {
+        float v = bz_stat_point(metric, age);
+        if (v > peak) peak = v;
+    }
     return peak;
 }
 
@@ -189,7 +193,7 @@ bool bz_app_tick(uint32_t now_ms) {
     if (!app.started) return false;
     bz.now = now_ms;
 
-    // Meter statistics only cover time spent mining, not the start-up ramp.
+    // History only covers time spent mining, not the loading screen.
     if ((int32_t)(now_ms - app.next_stat) >= 0) {
         app.next_stat = now_ms + STAT_PERIOD_MS;
         if (app.base_mining) stats_sample();

@@ -7,14 +7,20 @@
 
 #define BZ_TICK_MS 33u
 
+// One graph column per BZ_GRAPH_STEP_S seconds: about ten minutes in all.
+#define BZ_GRAPH_POINTS 119
+#define BZ_GRAPH_STEP_S 5u
+#define BZ_GRAPH_GAP (-1.0f) // A point with no data (host away, value unknown)
+
 typedef struct {
-    uint16_t samples;  // Readings averaged so far, saturating
-    float average;     // Slow running average, base units
     float session_max; // Highest value since power-up; sets the meter range
-    float bucket_max;  // Highest value in the bucket being filled
-    float history[60]; // Bucket maxima, newest at history_head - 1
-    uint8_t history_head;
-    uint8_t history_count;
+    float bucket_sum;  // Readings in the point being filled
+    uint8_t bucket_count;
+    // Mean of each completed point in base units, as a ring; the newest is
+    // at graph_head - 1.
+    float graph[BZ_GRAPH_POINTS];
+    uint8_t graph_head;
+    uint8_t graph_count;
 } bz_stat_t;
 
 typedef struct {
@@ -28,8 +34,11 @@ typedef struct {
 
 extern bz_state_t bz;
 
-// Highest recent value for the peak marker, in base units.
+// Highest value in the graph window for the peak marker, in base units.
 float bz_stat_peak(bz_metric_t metric);
+// Graph point `age` steps back (0 is the newest completed point). Returns
+// BZ_GRAPH_GAP for a point with no data or one older than the history.
+float bz_stat_point(bz_metric_t metric, int age);
 // Marks settings changed: applies brightness and schedules a save.
 void bz_settings_changed(void);
 
@@ -39,6 +48,11 @@ void bz_boot_enter(bool cold);
 void bz_boot_tick(void);
 bool bz_boot_done(void);
 void bz_boot_draw(void);
+
+// ---- Metric icons -----------------------------------------------------------
+#define BZ_ICON_SIZE 9
+// Draws the metric's icon with its top-left corner at (x, y); BZ_M_NONE has none.
+void bz_icon(int x, int y, bz_metric_t metric, int level);
 
 // ---- Mining pages -----------------------------------------------------------
 void bz_mining_draw(void);

@@ -26,7 +26,8 @@ typedef struct {
     char asic[16];
     char ip[16];
     char best_diff[32];
-    char pool[48];
+    char pool[48];      // Stratum host name
+    char net_diff[16];  // Network difficulty as the host words it: "129.44T"
     uint32_t hashrate_ghs;
     uint32_t chip_temp_c;
     uint32_t vr_temp_c;
@@ -65,6 +66,7 @@ typedef enum {
     BZ_M_POOL,
     BZ_M_DEVICE,
     BZ_M_FREQUENCY,
+    BZ_M_NET_DIFF,
     BZ_M_COUNT
 } bz_metric_t;
 
@@ -72,7 +74,7 @@ typedef struct {
     char value[24]; // "1.21", "58", "192.168.1.234" or "--"
     char unit[6];   // "TH/s", "C", "" ...
     bool valid;     // Host has supplied the value
-    bool gauge;     // Has a number that can drive a bar meter
+    bool gauge;     // Has a number that can drive a graph or bar meter
     float number;   // Gauge value in the metric's base unit (GH/s for hashrate)
     float unit_div; // Base units per shown unit: 1000 when GH/s reads as TH/s
     float fixed_max; // Meter full scale in base units, or 0 to auto-range
@@ -85,7 +87,8 @@ void bz_metric_read(bz_metric_t metric, const bz_data_t *data, bz_reading_t *out
 // ---- Settings ---------------------------------------------------------------
 
 typedef enum {
-    BZ_PAGE_HERO,   // One big metric with a bar meter, four side metrics
+    BZ_PAGE_HERO,   // One big metric with a history graph, four icon metrics,
+                    // and the stratum host and network difficulty
     BZ_PAGE_GRID,   // Six equal metrics
     BZ_PAGE_DUO,    // Two big metrics
     BZ_PAGE_COUNT

@@ -36,6 +36,7 @@ static const struct {
     [BZ_M_POOL] = {"POOL", "POOL"},
     [BZ_M_DEVICE] = {"ASIC MODEL", "ASIC"},
     [BZ_M_FREQUENCY] = {"FREQUENCY", "FREQ"},
+    [BZ_M_NET_DIFF] = {"NETWORK DIFF", "NET"},
 };
 
 const char *bz_metric_name(bz_metric_t metric) {
@@ -131,6 +132,7 @@ void bz_metric_read(bz_metric_t metric, const bz_data_t *d, bz_reading_t *out) {
     case BZ_M_POOL: set_text(out, d->pool, ""); break;
     case BZ_M_DEVICE: set_text(out, *d->asic ? d->asic : d->family, ""); break;
     case BZ_M_FREQUENCY: set_gauge(out, d->frequency_mhz, "MHz", 0); break;
+    case BZ_M_NET_DIFF: set_text(out, d->net_diff, ""); break;
     default: break; // BZ_M_NONE: an empty slot
     }
 }
@@ -156,7 +158,7 @@ const char *bz_page_name(bz_page_t page) {
 }
 
 const char *bz_page_slot_name(bz_page_t page, int slot) {
-    static const char *const hero[] = {"MAIN", "SIDE 1", "SIDE 2", "SIDE 3", "SIDE 4"};
+    static const char *const hero[] = {"MAIN", "TOP LEFT", "TOP RIGHT", "LOW LEFT", "LOW RIGHT"};
     static const char *const grid[] = {"TOP LEFT", "TOP MID", "TOP RIGHT",
                                        "LOW LEFT", "LOW MID", "LOW RIGHT"};
     static const char *const duo[] = {"LEFT", "RIGHT"};

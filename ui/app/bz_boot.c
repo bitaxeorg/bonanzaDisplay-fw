@@ -1,5 +1,5 @@
-// Retro loading screen: the Bitaxe logo, a typed-out start-up log that
-// follows the real host start-up, and a dithered progress bar.
+// Retro loading screen: a twinkling Bitaxe logo, a typed-out start-up log
+// that follows the real host start-up, and a dithered progress bar.
 
 #include "bz_internal.h"
 
@@ -233,6 +233,69 @@ static void draw_log(void) {
     }
 }
 
+// The logo shimmers. It rests dim; a band of brightness drifts through it,
+// and individual pixels flare to full white and fade back, each on its own
+// schedule, lighting their neighbours as they go. Everything derives from the
+// clock and the pixel position, so no per-pixel state is kept.
+//
+// The panel's gray levels are linear in light output, so to the eye level 8
+// is already three quarters of the way to white. The resting level has to be
+// very low for the sparkles to stand out.
+#define LOGO_REST 2          // Resting brightness
+#define LOGO_RIPPLE 5        // The drifting band adds up to this much
+#define TWINKLE_RISE_MS 100u
+#define TWINKLE_FALL_MS 600u
+#define TWINKLE_MIN_MS 1500u // Each pixel flares once in this long...
+#define TWINKLE_SPREAD_MS 3000u // ...plus up to this much more
+
+static uint32_t pixel_hash(int x, int y) {
+    uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+static bool logo_pixel(int x, int y) {
+    if (x < 0 || y < 0 || x >= bz_logo_w || y >= bz_logo_h) return false;
+    return bz_logo_bits[y * ((bz_logo_w + 7) / 8) + x / 8] & (0x80 >> (x % 8));
+}
+
+// How far through its flare a logo pixel is: 0 (resting) to 15 (peak).
+static int flare(int x, int y) {
+    if (!logo_pixel(x, y)) return 0;
+    uint32_t h = pixel_hash(x, y);
+    uint32_t period = TWINKLE_MIN_MS + h % TWINKLE_SPREAD_MS;
+    uint32_t t = (bz.now + (h >> 12)) % period;
+    if (t < TWINKLE_RISE_MS) return (int)(t * 15u / TWINKLE_RISE_MS);
+    if (t < TWINKLE_RISE_MS + TWINKLE_FALL_MS)
+        return (int)((TWINKLE_RISE_MS + TWINKLE_FALL_MS - t) * 15u / TWINKLE_FALL_MS);
+    return 0;
+}
+
+static void draw_logo(int x0, int y0) {
+    for (int y = 0; y < bz_logo_h; ++y) {
+        for (int x = 0; x < bz_logo_w; ++x) {
+            if (!logo_pixel(x, y)) continue;
+
+            // Ripple: a triangle wave about 43 pixels long, drifting sideways
+            // once every three seconds or so.
+            uint32_t wave = ((uint32_t)(x * 3 + y * 5) * 8u + bz.now / 3u) & 1023u;
+            int level = LOGO_REST +
+                        (int)((wave < 512u ? wave : 1023u - wave) * (LOGO_RIPPLE + 1u) / 512u);
+
+            // Twinkle: the pixel's own flare, or half of its brightest
+            // neighbour's, so each sparkle is a small glint rather than a dot.
+            int glint = flare(x, y);
+            static const int8_t around[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (int n = 0; n < 4; ++n) {
+                int near = flare(x + around[n][0], y + around[n][1]) / 2;
+                if (near > glint) glint = near;
+            }
+            if (glint > level) level = glint;
+            bz_px(x0 + x, y0 + y, level);
+        }
+    }
+}
+
 // A plain checkered bar across the bottom edge.
 static void draw_progress(void) {
     int fill = BZ_W * b.progress / 1000;
@@ -251,7 +314,7 @@ void bz_boot_draw(void) {
         return;
     }
 
-    bz_bitmap(3, 8, bz_logo_bits, bz_logo_w, bz_logo_h, BZ_WHITE);
+    draw_logo(3, 8);
     bz_text_center(41, 42, "OPEN SOURCE MINING", BZ_FONT_TINY, BZ_MID);
     draw_log();
     draw_progress();

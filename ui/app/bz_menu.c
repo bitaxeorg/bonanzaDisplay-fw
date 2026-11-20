@@ -233,6 +233,10 @@ static void draw_list(void) {
         if (selected) bz_fill(0, y, LIST_W - 4, ROW_H, BZ_WHITE);
         int level = selected ? BZ_BLACK : BZ_WHITE;
         bz_text(3, y + 1, label, BZ_FONT_SMALL, level);
+        // The metric picker doubles as the key to the icons. Only the
+        // selected row shows one: icons fill the row height, so a column of
+        // them would run together.
+        if (m.page == PAGE_PICK_METRIC && selected) bz_icon(LIST_W - 28, y, metric_at(index), level);
         // Long values such as metric names drop to the tiny font to fit.
         int room = LIST_W - 4 - 3 - bz_text_w(label, BZ_FONT_SMALL, 1) - 6;
         if (bz_text_w(value, BZ_FONT_SMALL, 1) <= room)

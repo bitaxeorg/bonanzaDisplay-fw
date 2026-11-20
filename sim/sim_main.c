@@ -15,6 +15,8 @@
 //        strip:<file.png>:<n>:<ms>     n frames, ms apart, stacked in one image
 //        snap  sheet:<file.png>        collect frames, then stack them in one image
 //        tint:green|gray               colour of later images (default gray)
+//        pool:<host name>              stratum host the pretend host reports
+//        netdiff:on|off                whether the host reports network difficulty
 //        expect:boot|mining|menu       fail unless the UI is in that mode
 //        set:<page>:<digits>:<m,m,..>  store settings (metric ids) and power-cycle
 //        reboot  status
@@ -105,11 +107,18 @@ static bool host_has_wifi(void) {
     return host_mode == HOST_UP || (host_mode == HOST_BOOT && host_age() >= 2500);
 }
 
+// Slow wander on top of the jitter, so history graphs have some shape.
+static double host_drift;
+// Off imitates a host whose BAP does not report network difficulty yet.
+static bool host_net_diff = true;
+static char host_pool[48] = "public-pool.io";
+
 static double host_hashrate(void) {
-    if (host_mode == HOST_UP) return 3000.0 + jitter(120);
+    host_drift = host_drift * 0.985 + jitter(14);
+    if (host_mode == HOST_UP) return 3000.0 + host_drift + jitter(60);
     if (host_mode != HOST_BOOT || host_age() < 5000) return 0;
     double ramp = (double)(host_age() - 5000) / 4000.0;
-    return (ramp > 1 ? 1 : ramp) * 3000.0 + jitter(80);
+    return (ramp > 1 ? 1 : ramp) * (3000.0 + host_drift) + jitter(60);
 }
 
 static void host_telemetry(void) {
@@ -145,9 +154,10 @@ static void host_receive(const char *sentence) {
     if (strstr(sentence, "REQ,systemInfo")) {
         host_send("RES", "deviceModel", "Bonanza");
         host_send("RES", "asicModel", "BZM");
-        host_send("RES", "pool", "public-pool.io");
+        host_send("RES", "pool", host_pool);
         host_send("RES", "poolPort", "21496");
         host_send("RES", "poolUser", "bc1qexample.bonanza");
+        if (host_net_diff) host_send("RES", "networkDifficulty", "129.44T");
     }
 }
 
@@ -220,6 +230,14 @@ static void chunk(FILE *f, const char *type, const uint8_t *data, uint32_t size)
 
 // Writes `frames` panel images stacked vertically, each SCALE times enlarged
 // with a dark gutter between them. Pixels are quantised to the panel's 16 levels.
+// How bright each of the panel's 16 gray levels looks, as an sRGB value.
+// The firmware uses the SSD1322's default linear table: light output rises
+// in equal steps from level 1 (off) to level 15, so to the eye the middle
+// levels sit much closer to full brightness than their numbers suggest.
+// These are 255 * ((level - 1) / 14) ^ (1 / 2.2).
+static const uint8_t panel_look[16] = {0,   0,   77,  105, 127, 144, 160, 174,
+                                       186, 198, 209, 219, 229, 238, 247, 255};
+
 // Colour of a fully lit pixel. The bonanzaDisplay panel is green.
 static const uint8_t tint_green[3] = {110, 255, 90};
 static const uint8_t tint_gray[3] = {255, 255, 255};
@@ -241,8 +259,8 @@ static bool write_png(const char *path, const uint8_t *frames_l8, int frames) {
             const uint8_t *src = frames_l8 + (size_t)f * BZ_W * BZ_H + (size_t)(y / SCALE) * BZ_W;
             row[0] = 0;
             for (int x = 0; x < w; ++x) {
-                unsigned level = src[x / SCALE] >> 4; // 0..15
-                for (int c = 0; c < 3; ++c) row[1 + x * 3 + c] = (uint8_t)(level * image_tint[c] / 15);
+                unsigned look = panel_look[src[x / SCALE] >> 4];
+                for (int c = 0; c < 3; ++c) row[1 + x * 3 + c] = (uint8_t)(look * image_tint[c] / 255);
             }
         }
     }
@@ -353,6 +371,10 @@ int main(int argc, char **argv) {
             image_tint = tint_green;
         } else if (!strcmp(arg, "tint:gray")) {
             image_tint = tint_gray;
+        } else if (!strncmp(arg, "pool:", 5)) {
+            snprintf(host_pool, sizeof(host_pool), "%s", arg + 5);
+        } else if (!strcmp(arg, "netdiff:on") || !strcmp(arg, "netdiff:off")) {
+            host_net_diff = arg[9] == 'n';
         } else if (!strcmp(arg, "snap")) {
             if (snaps == 32) return fail(arg, "too many frames");
             memcpy(sheet[snaps++], bz_fb, sizeof(bz_fb));
@@ -421,7 +443,7 @@ static int interactive(void) {
         // Tint like the panel; scale brightness as the contrast setting would.
         int scale = 100 + 52 * (brightness < 0 ? 3 : brightness);
         for (int i = 0; i < BZ_W * BZ_H; ++i) {
-            uint32_t level = (uint32_t)((bz_fb[i] >> 4) * 17 * scale / 256);
+            uint32_t level = (uint32_t)(panel_look[bz_fb[i] >> 4] * scale / 256);
             pixels[i] = 0xff000000u | (level * tint_green[0] / 255) << 16 |
                         (level * tint_green[1] / 255) << 8 | level * tint_green[2] / 255;
         }

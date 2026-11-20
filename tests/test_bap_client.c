@@ -42,12 +42,15 @@ static void test_metrics_and_stream(void) {
     // Fields behind the selectable mining-screen metrics, in host units.
     const char *more[][2] = {{"vrTemp", "47.000000"}, {"voltage", "5020.00"}, {"current", "3506.25"},
                              {"shares", "1532/4"}, {"block_height", "921034"},
-                             {"wifi_rssi", "-58"}, {"pool", "public-pool.io"}};
+                             {"wifi_rssi", "-58"}, {"pool", "public-pool.io"},
+                             {"networkDifficulty", "129.44T"}};
+    assert(!*m.network_difficulty); // Hosts that do not send it leave it empty.
     for (size_t i = 0; i < sizeof(more) / sizeof(*more); ++i) receive(&c, "RES", more[i][0], more[i][1], 2500);
     assert(bonanza_bap_client_take_update(&c, &m));
     assert(m.vr_temp_c == 47 && m.voltage_mv == 5020 && m.current_ma == 3506);
     assert(m.shares_accepted == 1532 && m.shares_rejected == 4 && m.block_height == 921034);
     assert(m.wifi_rssi_dbm == -58 && !strcmp(m.pool, "public-pool.io"));
+    assert(!strcmp(m.network_difficulty, "129.44T"));
     // Malformed share counts and signal strengths leave the last good values.
     const char *bad_more[][2] = {{"shares", "12"}, {"shares", "1/"}, {"shares", "/2"}, {"shares", "1/2/3"},
                                  {"shares", "-1/2"}, {"shares", "99999999999/1"}, {"wifi_rssi", "--5"},

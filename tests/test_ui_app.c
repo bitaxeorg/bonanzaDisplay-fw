@@ -1,6 +1,7 @@
 // Host tests for the retro UI state machine (ui/app). No LVGL or Pico SDK.
 
 #include "app/bz_app.h"
+#include "app/bz_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -70,6 +71,7 @@ static void host_up(void) {
     snprintf(data.ip, sizeof(data.ip), "192.168.1.234");
     snprintf(data.best_diff, sizeof(data.best_diff), "4.29G");
     snprintf(data.pool, sizeof(data.pool), "public-pool.io");
+    snprintf(data.net_diff, sizeof(data.net_diff), "129.44T");
     data.hashrate_ghs = 1210;
     data.chip_temp_c = 58;
     data.vr_temp_c = 47;
@@ -124,6 +126,8 @@ static void test_metric_formatting(void) {
     assert(!strcmp(r.value, "58") && r.fixed_max == 100.0f);
     bz_metric_read(BZ_M_DEVICE, &data, &r);
     assert(!strcmp(r.value, "BM1370"));
+    bz_metric_read(BZ_M_NET_DIFF, &data, &r);
+    assert(!strcmp(r.value, "129.44T") && !*r.unit && !r.gauge);
 
     // Unknown values never show stale or garbage numbers.
     bz_data_reset(&data);
@@ -251,12 +255,12 @@ static void test_menu_changes_metrics(uint32_t start) {
     const bz_settings_t *s = bz_app_settings();
     assert(s->page == BZ_PAGE_HERO && s->slots[BZ_PAGE_HERO][1] == BZ_M_CHIP_TEMP);
 
-    // SETUP > METRICS > SIDE 1 > turn to VOLTAGE > push.
+    // SETUP > METRICS > TOP LEFT > turn to VOLTAGE > push.
     click();
     assert(bz_app_mode() == BZ_MODE_MENU);
     turn(1);
     click();  // METRICS
-    turn(1);  // MAIN -> SIDE 1
+    turn(1);  // MAIN -> TOP LEFT
     click();  // Picker, cursor on CHIP TEMP
     turn(4);  // VR TEMP, POWER, EFFICIENCY, VOLTAGE
     assert(s->slots[BZ_PAGE_HERO][1] == BZ_M_VOLTAGE); // Live preview
@@ -394,6 +398,43 @@ static void test_page_flip(void) {
     assert(bz_app_mode() == BZ_MODE_BOOT);
 }
 
+static unsigned lit_in(int x0, int y0, int x1, int y1) {
+    unsigned lit = 0;
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x) lit += bz_fb[y * BZ_W + x] != 0;
+    return lit;
+}
+
+// Every metric has its own icon, and the HERO page always carries the stratum
+// host and the network difficulty.
+static void test_icons_and_hero_info(void) {
+    static uint8_t seen[BZ_M_COUNT][BZ_ICON_SIZE * BZ_ICON_SIZE];
+    bz_clip_reset();
+    for (int metric = 0; metric < BZ_M_COUNT; ++metric) {
+        bz_clear();
+        bz_icon(3, 3, (bz_metric_t)metric, BZ_WHITE);
+        unsigned lit = lit_pixels();
+        assert(lit == lit_in(3, 3, 2 + BZ_ICON_SIZE, 2 + BZ_ICON_SIZE)); // Stays in its box
+        assert(metric == BZ_M_NONE ? lit == 0 : lit >= 12);
+        for (int y = 0; y < BZ_ICON_SIZE; ++y)
+            memcpy(&seen[metric][y * BZ_ICON_SIZE], &bz_fb[(3 + y) * BZ_W + 3], BZ_ICON_SIZE);
+        for (int other = 1; other < metric; ++other) assert(memcmp(seen[other], seen[metric], sizeof(seen[0])));
+    }
+
+    flash_valid = false;
+    boot_to_mining(1000);
+    assert(bz_app_settings()->page == BZ_PAGE_HERO);
+    // Text of the two info lines, right of their icons.
+    unsigned pool_line = lit_in(161, 40, 255, 48), net_line = lit_in(161, 53, 255, 61);
+    assert(pool_line > 40 && net_line > 40);
+    // A host that does not report network difficulty leaves a placeholder.
+    data.net_diff[0] = '\0';
+    bz_app_set_data(&data);
+    run(100);
+    unsigned placeholder = lit_in(161, 53, 255, 61);
+    assert(lit_in(161, 40, 255, 48) == pool_line && placeholder > 0 && placeholder < net_line);
+}
+
 // Every page with every metric in every slot, in both digit styles: exercises
 // the drawing code under the sanitizers.
 static void test_draw_everything(void) {
@@ -435,6 +476,7 @@ int main(void) {
     test_menu_changes_metrics(UINT32_MAX - 20000u); // Millisecond counter wraps mid-test
     test_menu_other_settings();
     test_page_flip();
+    test_icons_and_hero_info();
     test_draw_everything();
     puts("UI app tests passed");
     return 0;
