@@ -8,6 +8,8 @@
 #define BONANZA_BAP_MAX_MESSAGE 256u
 #define BONANZA_METRIC_UNKNOWN UINT32_MAX
 #define BONANZA_RSSI_UNKNOWN INT32_MIN
+#define BONANZA_MAX_ASICS 4u
+#define BONANZA_MAX_DOMAINS 4u
 
 typedef enum {
     BONANZA_LINK_WAITING,    // No recognized response yet, or the host timed out
@@ -32,6 +34,21 @@ typedef struct {
     char pool[48];
     char network_difficulty[16]; // Empty until a host that reports it does
     char hostname[33];           // Likewise; ESP-Miner host names are at most 32 long
+    // Per-chip detail from hosts that send it. The counts are 0 until then,
+    // and entries past them are BONANZA_METRIC_UNKNOWN.
+    uint8_t asic_count, domain_count;
+    uint32_t asic_temp_c[BONANZA_MAX_ASICS];
+    uint32_t asic_voltage_mv[BONANZA_MAX_ASICS];
+    uint32_t asic_frequency_mhz[BONANZA_MAX_ASICS];
+    uint32_t asic_hashrate_ghs[BONANZA_MAX_ASICS];
+    uint32_t domain_voltage_mv[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS];
+    uint32_t domain_frequency_mhz[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS];
+    uint32_t domain_hashrate_ghs[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS];
+    // 256-bit values, most significant byte first, from hosts that send them.
+    uint8_t network_target[32];
+    uint8_t best_share_hash[32];
+    uint8_t last_share_hash[32];
+    bool has_network_target, has_best_share_hash, has_last_share_hash;
     uint32_t power_mw;        // Same reading as power_w, kept to 1 mW
     uint32_t vr_temp_c;
     uint32_t voltage_mv;      // Input voltage; the host reports millivolts

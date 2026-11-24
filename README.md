@@ -7,7 +7,7 @@ Firmware for driving a **SSD1322-based 256×64 OLED display** from an **RP2354A 
 
 The display runs a **retro pixel UI** with three modes: a loading screen while
 the bitaxe starts up, mining pages once it is hashing, and a setup menu,
-driven by the dial switch, that chooses which metrics the mining pages show.
+driven by the dial switch, that chooses which metrics the overview page shows.
 See [Using the display](#using-the-display).
 
 The screens are plain C in `ui/app`, drawn into a framebuffer that LVGL
@@ -85,9 +85,12 @@ flip, so they survive power cycles and firmware updates.
 
 | Page | Slots | Layout |
 | --- | --- | --- |
-| `HERO` | 5 | One big metric with a scrolling graph of its last ten minutes; beside it a device line (host name, WiFi signal bars, ASIC model), four icon metrics, the stratum host, and the network difficulty |
-| `GRID` | 6 | Six equal metrics, three by two |
-| `DUO` | 2 | Two big metrics, each with a bar meter and a marker at its ten-minute peak |
+| `HERO` | 5 | The overview: one big metric with a scrolling graph of its last ten minutes; beside it a device line (host name, WiFi signal bars, ASIC model), four icon metrics, the stratum host, and the network difficulty |
+| `TARGET` | 0 | The network target, the best share and the latest share written out in hex, to show how close the miner has come to a block |
+| `ASIC` | 0 | Every ASIC chip, and the domains inside each: temperature, hashrate, frequency and voltage |
+
+`HERO` is the overview; the other pages each go into one area in depth and
+have nothing to choose.
 
 The `HERO` graph scrolls from right to left, one column every five seconds,
 with the live value in the last column. Its vertical scale fits the values in
@@ -113,25 +116,70 @@ Above the block, the device line shows the host name and ends with the WiFi
 signal bars and the ASIC badge. Until the host reports its name the line
 shows the device family instead.
 
-The `DUO` bar meters auto-range to a round full scale above the highest value
-seen since power-up; temperatures use a fixed 0–100 scale.
+![HERO page](docs/screens/hero.png)
 
-| `HERO` | `GRID` | `DUO` |
+#### The `TARGET` page
+
+A miner hashes block headers until one comes out at or below the network
+target. The `TARGET` page shows that contest directly. It writes three
+256-bit numbers one above the other, most significant digit first, with the
+first 27 of their 64 hex digits:
+
+| Row | Number | Right-hand column |
 | --- | --- | --- |
-| ![HERO page](docs/screens/hero.png) | ![GRID page](docs/screens/grid.png) | ![DUO page](docs/screens/duo.png) |
+| `TARGET` (globe) | The network target a block hash must not exceed | Network difficulty |
+| `BEST` (trophy) | The lowest share hash this miner has found | Best difficulty |
+| `LAST` (tick) | The most recent share hash; its icon flashes when a new one arrives | That share's difficulty |
+
+Each number's leading zeros are drawn as a solid bar, so a longer bar is a
+smaller number, and a dotted line runs down from the end of the target's bar:
+that is how far a share's zeros have to reach. The line under the rows says
+how many times too high the best hash is, and how many leading zeros it has
+against the target's. When a share is at or below the target it says
+`BLOCK FOUND!`.
+
+A host that reports the numbers themselves gets every digit shown. From a host
+that reports only difficulties, the display works the target and the best
+share out from `networkDifficulty` and `best_difficulty`; rounded text such as
+`4.29G` only fixes the first few digits, so the rest are drawn as dots. The
+latest share needs the host to report it. See
+[Dashboard data and units](#dashboard-data-and-units).
+
+![TARGET page](docs/screens/target.png)
+
+#### The `ASIC` page
+
+One row per ASIC chip, numbered down the left.
+
+The left half is the chip as a whole, under an icon and unit for each column:
+temperature in °C, hashrate in GH/s, clock frequency in MHz, and voltage in
+volts.
+
+The right half breaks the same chip down by its internal domains, one column
+per domain. It shows one metric at a time and steps to the next every four
+seconds: hashrate in GH/s, voltage in mV, then frequency in MHz. The three
+icons above it show which is up, the current one in inverse video, and the
+heading gives the domains and the unit, for example `DOMAIN 1-4 MV`.
+
+The page takes whatever the host reports: up to four chips of up to four
+domains each. A value the host leaves out shows as `--`. A host that reports
+no per-chip data at all gets a `WAITING FOR HOST` notice instead of a table;
+see [Dashboard data and units](#dashboard-data-and-units).
+
+![ASIC page](docs/screens/asic.png)
 
 ### Setup menu
 
 ```text
 SETUP
-├── LAYOUT       HERO / GRID / DUO             which page is shown
-├── METRICS      one entry per slot of that page; each opens a metric picker
+├── PAGE         HERO / TARGET / ASIC          which page is shown
+├── HERO METRICS one entry per HERO slot; each opens a metric picker
 ├── BRIGHTNESS   1 LOW .. 4 HIGH               panel contrast current
-├── RESET ALL    asks first; restores the default pages and metrics
+├── RESET ALL    asks first; restores the default page and HERO metrics
 └── EXIT
 ```
 
-| Setup | Metrics of the current page |
+| Setup | Metrics of the `HERO` page |
 | --- | --- |
 | ![Setup menu](docs/screens/setup.png) | ![Metrics menu](docs/screens/metrics.png) |
 
@@ -139,8 +187,7 @@ SETUP
 | --- |
 | ![Metric picker](docs/screens/metric-picker.png) |
 
-Each page keeps its own metric choices. Any slot can show any of these, or be
-left empty:
+Any `HERO` slot can show any of these, or be left empty:
 
 | Metric | Shown as | Source |
 | --- | --- | --- |
@@ -382,12 +429,32 @@ partially parsed numeric values are rejected.
 | `pool` | `public-pool.io` | Stratum host name |
 | `networkDifficulty` | `129.44T` | Host-formatted network difficulty string |
 | `hostname` | `bitaxe` | Host name on the `HERO` device line |
+| `networkTarget` | 64 hex digits | Network target on the `TARGET` page |
+| `bestShareHash` | 64 hex digits | Lowest share hash on the `TARGET` page |
+| `lastShareHash` | 64 hex digits | Most recent share hash on the `TARGET` page |
+| `asicTemp` | `58,57,60,59` | Temperature of each chip, °C |
+| `asicHashrate` | `752,748,760,741` | Hashrate of each chip, GH/s |
+| `asicFrequency` | `800,800,800,800` | Clock frequency of each chip, MHz |
+| `asicVoltage` | `2801,2795,2810,2799` | Voltage across each chip, mV; shown in volts |
+| `domainHashrate` | `190/188,187/191` | Hashrate of each domain of each chip, GH/s |
+| `domainVoltage` | `1401/1399,1398/1402` | Voltage of each domain of each chip, mV |
+| `domainFrequency` | `800/800,787/800` | Clock frequency of each domain of each chip, MHz |
 
-`networkDifficulty` and `hostname` are not part of ESP-Miner's BAP today. The
-display reads them from the `systemInfo` response, which it requests every ten
-seconds, so a host only has to add two lines beside `pool` there: its
-`network_diff_string` and its configured host name. Until it does, the
-display shows `--` for the difficulty and the device family for the name. The
+`networkDifficulty`, `hostname` and the three 64-digit values are not part of
+ESP-Miner's BAP today. The display reads `networkDifficulty` and `hostname`
+from the `systemInfo` response, which it requests every ten seconds, so a host
+only has to add two lines beside `pool` there: its `network_diff_string` and
+its configured host name. Until it does, the display shows `--` for the
+difficulty and the device family for the name. The 64-digit values are
+256-bit numbers written most significant digit first, the way a block
+explorer shows a block hash; they are accepted in any `RES` message.
+
+The `asic...` and `domain...` fields feed the `ASIC` page and are not part of
+ESP-Miner's BAP today either. Each is a list with one entry per chip,
+separated by commas. In the `domain...` lists an entry is itself a list of
+that chip's domains, separated by `/`, and every chip must list the same
+number of them. Up to four chips of four domains are accepted; a malformed
+list is ignored and the last good one kept. The
 exact host change is written up in [`docs/host-bap-todo.md`](docs/host-bap-todo.md).
 
 These units follow the host implementation: hashrate is **GH/s**, and the
@@ -643,7 +710,9 @@ bonanzaDisplay/
 │   ├── app/                    # Retro UI: plain C, no LVGL or Pico SDK
 │   │   ├── bz_app.c            # Modes, dial input, settings, metric history
 │   │   ├── bz_boot.c           # Loading screen
-│   │   ├── bz_mining.c         # HERO, GRID and DUO pages, graph and bar meters
+│   │   ├── bz_mining.c         # HERO overview page and its history graph
+│   │   ├── bz_asic.c           # ASIC page: every chip and its domains
+│   │   ├── bz_target.c         # TARGET page: target and share hashes in hex
 │   │   ├── bz_menu.c           # Setup menu
 │   │   ├── bz_model.c          # Metric catalogue and settings blob
 │   │   ├── bz_gfx.c            # Framebuffer drawing and bitmap text

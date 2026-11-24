@@ -18,6 +18,45 @@ typedef enum {
     BZ_LINK_RESTARTING,
 } bz_link_t;
 
+// A 256-bit number, most significant byte first, the way targets and block
+// hashes are written out. `digits` says how many of its 64 hex digits are
+// known, counting from the left: 64 for an exact value, fewer for one worked
+// out from a rounded difficulty, 0 for no value at all.
+typedef struct {
+    uint8_t be[32];
+    uint8_t digits;
+} bz_u256_t;
+
+int bz_u256_digit(const bz_u256_t *value, int index); // Hex digit 0..63 from the left
+int bz_u256_zeros(const bz_u256_t *value);            // Leading zero hex digits, 0..64
+// The difficulty a hash or target stands for: the difficulty-1 target divided
+// by the value. 0 when there is no value.
+double bz_u256_difficulty(const bz_u256_t *value);
+// How many times larger `value` is than `target`; 0 when either is missing.
+double bz_u256_ratio(const bz_u256_t *value, const bz_u256_t *target);
+// The target a difficulty stands for, exact to `significant` hex digits after
+// its leading zeros.
+void bz_u256_from_difficulty(double difficulty, int significant, bz_u256_t *out);
+// The same from host text such as "129.44T" or "4.29G". False if it is not a
+// difficulty.
+bool bz_u256_from_text(const char *text, bz_u256_t *out);
+// "129.44T", "4.29G", "512": a number the way the host words difficulties.
+void bz_format_scaled(double value, char *out, size_t size);
+
+// One ASIC chip, and the separately clocked and powered domains inside it.
+#define BZ_MAX_ASICS 4
+#define BZ_MAX_DOMAINS 4
+
+typedef struct {
+    uint32_t temp_c;
+    uint32_t voltage_mv;
+    uint32_t frequency_mhz;
+    uint32_t hashrate_ghs;
+    uint32_t domain_voltage_mv[BZ_MAX_DOMAINS];
+    uint32_t domain_frequency_mhz[BZ_MAX_DOMAINS];
+    uint32_t domain_hashrate_ghs[BZ_MAX_DOMAINS];
+} bz_asic_t;
+
 // Snapshot of everything the host has told us. Numeric fields use BZ_UNKNOWN
 // (or BZ_RSSI_UNKNOWN) until a value arrives; strings are empty.
 typedef struct {
@@ -41,6 +80,15 @@ typedef struct {
     uint32_t shares_rejected;
     uint32_t block_height;
     int32_t rssi_dbm;
+    // Per-chip detail, from hosts that send it. Counts are 0 until then, and
+    // any single value may still be BZ_UNKNOWN.
+    uint8_t asic_count;   // 0..BZ_MAX_ASICS
+    uint8_t domain_count; // Domains reported per chip, 0..BZ_MAX_DOMAINS
+    bz_asic_t asics[BZ_MAX_ASICS];
+    // Exact values, from hosts that send them; see docs/host-bap-todo.md.
+    bz_u256_t net_target; // What a block hash must not exceed
+    bz_u256_t best_hash;  // Lowest share hash so far
+    bz_u256_t last_hash;  // Most recent share hash
 } bz_data_t;
 
 void bz_data_reset(bz_data_t *data);
@@ -88,14 +136,14 @@ void bz_metric_read(bz_metric_t metric, const bz_data_t *data, bz_reading_t *out
 // ---- Settings ---------------------------------------------------------------
 
 typedef enum {
-    BZ_PAGE_HERO,   // One big metric with a history graph, four icon metrics,
-                    // and the stratum host and network difficulty
-    BZ_PAGE_GRID,   // Six equal metrics
-    BZ_PAGE_DUO,    // Two big metrics
+    BZ_PAGE_HERO,   // Overview: one big metric with a history graph, four
+                    // icon metrics, the stratum host and network difficulty
+    BZ_PAGE_TARGET, // The network target against the best and latest share
+    BZ_PAGE_ASIC,   // Every ASIC chip and the domains inside it
     BZ_PAGE_COUNT
 } bz_page_t;
 
-#define BZ_MAX_SLOTS 6
+#define BZ_MAX_SLOTS 6 // Only HERO has slots today; the others are fixed
 #define BZ_BRIGHTNESS_LEVELS 4
 
 typedef struct {

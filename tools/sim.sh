@@ -23,10 +23,10 @@ if [ "$#" -eq 0 ]; then
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -g -O2 -I"$project_dir/ui" \
         -I"$project_dir/src/control" "-DBONANZA_FW_VERSION=\"$version\"" \
         "-DBONANZA_FW_BUILD=\"$build\"" -DSIM_SDL $(sdl2-config --cflags) $sources \
-        $(sdl2-config --libs) -lz -o "$build_dir/sim-sdl"
+        $(sdl2-config --libs) -lz -lm -o "$build_dir/sim-sdl"
     exec "$build_dir/sim-sdl"
 fi
 # shellcheck disable=SC2086
 "${CC:-cc}" $flags "-DBONANZA_FW_VERSION=\"$version\"" "-DBONANZA_FW_BUILD=\"$build\"" \
-    $sources -lz -o "$build_dir/sim"
+    $sources -lz -lm -o "$build_dir/sim"
 exec "$build_dir/sim" "$@"

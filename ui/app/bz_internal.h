@@ -13,7 +13,6 @@
 #define BZ_GRAPH_GAP (-1.0f) // A point with no data (host away, value unknown)
 
 typedef struct {
-    float session_max; // Highest value since power-up; sets the meter range
     float bucket_sum;  // Readings in the point being filled
     uint8_t bucket_count;
     // Mean of each completed point in base units, as a ring; the newest is
@@ -34,8 +33,6 @@ typedef struct {
 
 extern bz_state_t bz;
 
-// Highest value in the graph window for the peak marker, in base units.
-float bz_stat_peak(bz_metric_t metric);
 // Graph point `age` steps back (0 is the newest completed point). Returns
 // BZ_GRAPH_GAP for a point with no data or one older than the history.
 float bz_stat_point(bz_metric_t metric, int age);
@@ -59,8 +56,14 @@ void bz_mining_draw(void);
 // Large value text in dot-matrix digits. Returns the x after the text.
 int bz_big_text(int x, int y, const char *text, int level);
 int bz_big_text_w(const char *text);
-// Page thumbnail for the setup menu; highlight is a slot index or -1.
-void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on);
+// The TARGET page, in bz_target.c, and its thumbnail in a 121x33 box.
+void bz_target_draw(void);
+void bz_target_draw_preview(int x, int y);
+// The ASIC page, in bz_asic.c, and its thumbnail.
+void bz_asic_draw(void);
+void bz_asic_draw_preview(int x, int y);
+// Page thumbnail for the setup menu; highlight is a HERO slot index or -1.
+void bz_mining_draw_preview(int x, int y, bz_page_t page, int highlight, bool blink_on);
 
 // ---- Setup menu -------------------------------------------------------------
 typedef enum { BZ_PRESS_NONE, BZ_PRESS_CLICK, BZ_PRESS_HOLD } bz_press_t;

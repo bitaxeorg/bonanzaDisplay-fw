@@ -6,6 +6,7 @@
 // firmware main loop and the desktop simulator.
 
 #include <stdio.h>
+#include <string.h>
 
 #include "app/bz_model.h"
 #include "bap_client.h"
@@ -36,6 +37,32 @@ static inline void bonanza_ui_data_from_metrics(const bonanza_metrics_t *m, bz_d
     d->shares_rejected = m->shares_rejected;
     d->block_height = m->block_height;
     d->rssi_dbm = m->wifi_rssi_dbm;
+    d->asic_count = m->asic_count < BZ_MAX_ASICS ? m->asic_count : BZ_MAX_ASICS;
+    d->domain_count = m->domain_count < BZ_MAX_DOMAINS ? m->domain_count : BZ_MAX_DOMAINS;
+    for (unsigned i = 0; i < BZ_MAX_ASICS && i < BONANZA_MAX_ASICS; ++i) {
+        bz_asic_t *chip = &d->asics[i];
+        chip->temp_c = m->asic_temp_c[i];
+        chip->voltage_mv = m->asic_voltage_mv[i];
+        chip->frequency_mhz = m->asic_frequency_mhz[i];
+        chip->hashrate_ghs = m->asic_hashrate_ghs[i];
+        for (unsigned j = 0; j < BZ_MAX_DOMAINS && j < BONANZA_MAX_DOMAINS; ++j) {
+            chip->domain_voltage_mv[j] = m->domain_voltage_mv[i][j];
+            chip->domain_frequency_mhz[j] = m->domain_frequency_mhz[i][j];
+            chip->domain_hashrate_ghs[j] = m->domain_hashrate_ghs[i][j];
+        }
+    }
+    if (m->has_network_target) {
+        memcpy(d->net_target.be, m->network_target, sizeof(d->net_target.be));
+        d->net_target.digits = 64;
+    }
+    if (m->has_best_share_hash) {
+        memcpy(d->best_hash.be, m->best_share_hash, sizeof(d->best_hash.be));
+        d->best_hash.digits = 64;
+    }
+    if (m->has_last_share_hash) {
+        memcpy(d->last_hash.be, m->last_share_hash, sizeof(d->last_hash.be));
+        d->last_hash.digits = 64;
+    }
 }
 
 #endif

@@ -1,5 +1,5 @@
-// Mining pages. Each page is a fixed arrangement of slots; the setup menu
-// decides which metric each slot shows.
+// The HERO overview page, whose slots the setup menu fills, and the entry
+// points that hand the other pages to their own files.
 
 #include "bz_internal.h"
 
@@ -23,68 +23,6 @@ int bz_big_text(int x, int y, const char *text, int level) {
 #define BIG_BASE 22
 // Where small-font text goes to stand on the same baseline as the digits.
 #define BIG_UNIT_Y (BIG_BASE - 6)
-
-// ---- Bar meter ------------------------------------------------------------------
-
-typedef struct {
-    float max;    // Full scale, base units
-    float div;    // Base units per labelled unit
-    int decimals; // For the scale labels
-} scale_t;
-
-static scale_t meter_scale(bz_metric_t metric, const bz_reading_t *r) {
-    scale_t s = {r->fixed_max, r->unit_div, 0};
-    if (s.max <= 0) {
-        // Auto-range: the smallest round full scale with headroom over the
-        // highest value seen, in the unit currently shown.
-        static const float mantissas[] = {1, 2, 4, 6, 8, 10};
-        float top = bz.stats[metric].session_max;
-        if (r->valid && r->number > top) top = r->number;
-        top = top * 1.15f / s.div;
-        float decade = 1;
-        while (decade * 10 < top) decade *= 10;
-        while (decade > top && decade > 0.001f) decade /= 10;
-        s.max = decade * 10;
-        for (unsigned i = 0; i < sizeof(mantissas) / sizeof(*mantissas); ++i) {
-            if (decade * mantissas[i] >= top) {
-                s.max = decade * mantissas[i];
-                break;
-            }
-        }
-        if (top <= 0) s.max = 1;
-        s.max *= s.div;
-    }
-    float step = s.max / s.div / 4;
-    float tenths = step * 10;
-    if (step != (float)(int)step) s.decimals = tenths == (float)(int)tenths ? 1 : 2;
-    return s;
-}
-
-static void scale_label(char *out, size_t size, const scale_t *s, int quarter) {
-    float v = s->max / s->div * (float)quarter / 4;
-    long scaled = (long)(v * (s->decimals == 2 ? 100 : s->decimals == 1 ? 10 : 1) + 0.5f);
-    if (quarter == 0) snprintf(out, size, "0");
-    else if (s->decimals == 2) snprintf(out, size, "%ld.%02ld", scaled / 100, scaled % 100);
-    else if (s->decimals == 1) snprintf(out, size, "%ld.%ld", scaled / 10, scaled % 10);
-    else snprintf(out, size, "%ld", scaled);
-}
-
-static int bar_px(float value, const scale_t *s, int width) {
-    if (value <= 0 || s->max <= 0) return 0;
-    if (value >= s->max) return width;
-    return (int)(value / s->max * (float)width + 0.5f);
-}
-
-// One dithered bar with a solid leading edge and a peak-hold marker.
-static void draw_bar(int x, int y, int w, int h, float value, float peak, const scale_t *s) {
-    int fill = bar_px(value, s, w);
-    if (fill > 0) {
-        bz_dither(x, y, fill, h, BZ_WHITE, 0);
-        bz_vline(x + fill - 1, y, h, BZ_WHITE);
-    }
-    int mark = bar_px(peak, s, w);
-    if (mark > fill + 1) bz_vline(x + mark - 1, y + 1, h - 2, BZ_WHITE);
-}
 
 // ---- History graph ----------------------------------------------------------------
 
@@ -315,114 +253,39 @@ static void draw_hero(const uint8_t *slots) {
     draw_info_line(53, BZ_M_NET_DIFF, bz.data.net_diff);
 }
 
-// ---- GRID page --------------------------------------------------------------------
-
-static void draw_grid_cell(int x, int y, int w, bz_metric_t metric) {
-    if (metric == BZ_M_NONE) return;
-    bz_reading_t r;
-    bz_metric_read(metric, &bz.data, &r);
-    bz_text(x, y + 2, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
-    int value_w = bz_text_w(r.value, BZ_FONT_LARGE, 1);
-    int unit_w = *r.unit ? 2 + bz_text_w(r.unit, BZ_FONT_SMALL, 1) : 0;
-    bz_clip(x, y, w, 31);
-    if (value_w + unit_w <= w) {
-        int end = bz_text(x, y + 13, r.value, BZ_FONT_LARGE, BZ_WHITE);
-        bz_text(end + 2, y + 19, r.unit, BZ_FONT_SMALL, BZ_MID);
-    } else if (bz_text_w(r.value, BZ_FONT_SMALL, 1) <= w) {
-        bz_text(x, y + 17, r.value, BZ_FONT_SMALL, BZ_WHITE);
-    } else {
-        bz_text(x, y + 19, r.value, BZ_FONT_TINY, BZ_WHITE);
-    }
-    bz_clip_reset();
-}
-
-static void draw_grid(const uint8_t *slots) {
-    bz_vdots(85, 0, BZ_H, BZ_MID);
-    bz_vdots(171, 0, BZ_H, BZ_MID);
-    bz_hdots(0, 31, BZ_W, BZ_MID);
-    for (int i = 0; i < 6; ++i)
-        draw_grid_cell(2 + (i % 3) * 86 + (i % 3 ? 2 : 0), (i / 3) * 32, 80, (bz_metric_t)slots[i]);
-}
-
-// ---- DUO page ---------------------------------------------------------------------
-
-static void draw_duo_half(int x, int w, bz_metric_t metric) {
-    if (metric == BZ_M_NONE) return;
-    bz_reading_t r;
-    bz_metric_read(metric, &bz.data, &r);
-    bz_text(x, 0, bz_metric_name(metric), BZ_FONT_SMALL, BZ_MID);
-    int big_w = bz_big_text_w(r.value);
-    int unit_w = *r.unit ? 3 + bz_text_w(r.unit, BZ_FONT_SMALL, 1) : 0;
-    bz_clip(x, 0, w, BZ_H);
-    if (big_w + unit_w <= w) {
-        int end = bz_big_text(x, 10, r.value, BZ_WHITE);
-        bz_text(end + 3, 10 + BIG_UNIT_Y, r.unit, BZ_FONT_SMALL, BZ_WHITE);
-    } else if (big_w <= w) {
-        bz_big_text(x, 10, r.value, BZ_WHITE);
-        bz_text_right(x + w - 1, 0, r.unit, BZ_FONT_SMALL, BZ_WHITE);
-    } else if (bz_text_w(r.value, BZ_FONT_LARGE, 1) <= w) {
-        bz_text(x, 16, r.value, BZ_FONT_LARGE, BZ_WHITE);
-    } else {
-        bz_text(x, 20, r.value, BZ_FONT_SMALL, BZ_WHITE);
-    }
-    bz_clip_reset();
-    if (!r.gauge) return;
-
-    scale_t s = meter_scale(metric, &r);
-    bz_vline(x, 42, 11, BZ_WHITE);
-    bz_vline(x + w - 1, 42, 11, BZ_WHITE);
-    for (int i = 1; i < 4; ++i) bz_vline(x + i * (w - 1) / 4, 42, 2, BZ_WHITE);
-    bz_hdots(x, 44, w, BZ_WHITE);
-    bz_hdots(x, 55, w, BZ_WHITE);
-    draw_bar(x + 2, 46, w - 4, 8, r.valid ? r.number : 0, bz_stat_peak(metric), &s);
-    char text[12];
-    bz_text(x, 58, "0", BZ_FONT_TINY, BZ_MID);
-    scale_label(text, sizeof(text), &s, 2);
-    bz_text_center(x + w / 2, 58, text, BZ_FONT_TINY, BZ_MID);
-    scale_label(text, sizeof(text), &s, 4);
-    bz_text_right(x + w - 1, 58, text, BZ_FONT_TINY, BZ_MID);
-}
-
-static void draw_duo(const uint8_t *slots) {
-    bz_vdots(127, 0, BZ_H, BZ_MID);
-    draw_duo_half(0, 122, (bz_metric_t)slots[0]);
-    draw_duo_half(133, 122, (bz_metric_t)slots[1]);
-}
-
 // ---- Entry points -------------------------------------------------------------------
 
 void bz_mining_draw(void) {
-    const uint8_t *slots = bz.settings.slots[bz.settings.page];
     switch (bz.settings.page) {
-    case BZ_PAGE_HERO: draw_hero(slots); break;
-    case BZ_PAGE_GRID: draw_grid(slots); break;
-    default: draw_duo(slots); break;
+    case BZ_PAGE_TARGET: bz_target_draw(); break;
+    case BZ_PAGE_ASIC: bz_asic_draw(); break;
+    default: draw_hero(bz.settings.slots[BZ_PAGE_HERO]); break;
     }
 }
 
-// Thumbnail in a 121x33 box: one outlined cell per slot, labelled with the
-// metric it shows. Neighbouring cells share a border.
-void bz_mining_draw_preview(int x, int y, int highlight, bool blink_on) {
-    static const uint8_t hero[5][4] = {{0, 0, 66, 32}, {66, 7, 27, 9}, {93, 7, 27, 9},
-                                       {66, 16, 27, 9}, {93, 16, 27, 9}};
-    static const uint8_t grid[6][4] = {{0, 0, 40, 16}, {40, 0, 40, 16}, {80, 0, 40, 16},
-                                       {0, 16, 40, 16}, {40, 16, 40, 16}, {80, 16, 40, 16}};
-    static const uint8_t duo[2][4] = {{0, 0, 60, 32}, {60, 0, 60, 32}};
-    bz_page_t page = (bz_page_t)bz.settings.page;
-    const uint8_t (*cells)[4] = page == BZ_PAGE_HERO ? hero : page == BZ_PAGE_GRID ? grid : duo;
-    int count = bz_page_slot_count(page);
-    if (page == BZ_PAGE_HERO) {
-        // The fixed bands: the device line above the metrics, and the
-        // stratum host and network difficulty below.
-        bz_rect(x + 66, y, 55, 8, BZ_MID);
-        bz_text_center(x + 94, y + 2, "DEVICE", BZ_FONT_TINY, BZ_DIM);
-        bz_rect(x + 66, y + 25, 55, 8, BZ_MID);
-        bz_text_center(x + 94, y + 27, "POOL+NET", BZ_FONT_TINY, BZ_DIM);
+// Thumbnail of a page in a 121x33 box. HERO shows one outlined cell per slot,
+// labelled with the metric in it; neighbouring cells share a border.
+void bz_mining_draw_preview(int x, int y, bz_page_t page, int highlight, bool blink_on) {
+    static const uint8_t cells[5][4] = {{0, 0, 66, 32}, {66, 7, 27, 9}, {93, 7, 27, 9},
+                                        {66, 16, 27, 9}, {93, 16, 27, 9}};
+    if (page == BZ_PAGE_TARGET) {
+        bz_target_draw_preview(x, y);
+        return;
     }
-    for (int i = 0; i < count; ++i) {
+    if (page == BZ_PAGE_ASIC) {
+        bz_asic_draw_preview(x, y);
+        return;
+    }
+    // The fixed bands: the device line above the metrics, and the stratum
+    // host and network difficulty below.
+    bz_rect(x + 66, y, 55, 8, BZ_MID);
+    bz_text_center(x + 94, y + 2, "DEVICE", BZ_FONT_TINY, BZ_DIM);
+    bz_rect(x + 66, y + 25, 55, 8, BZ_MID);
+    bz_text_center(x + 94, y + 27, "POOL+NET", BZ_FONT_TINY, BZ_DIM);
+    for (int i = 0; i < bz_page_slot_count(BZ_PAGE_HERO); ++i) {
         int cx = x + cells[i][0], cy = y + cells[i][1], cw = cells[i][2], ch = cells[i][3];
         bz_rect(cx, cy, cw + 1, ch + 1, BZ_MID);
-        const char *label = bz_metric_short((bz_metric_t)bz.settings.slots[page][i]);
+        const char *label = bz_metric_short((bz_metric_t)bz.settings.slots[BZ_PAGE_HERO][i]);
         bz_text_center(cx + cw / 2 + 1, cy + (ch - 4) / 2, *label ? label : "-", BZ_FONT_TINY, BZ_WHITE);
         if (i == highlight && blink_on) bz_invert(cx + 1, cy + 1, cw - 1, ch - 1);
     }

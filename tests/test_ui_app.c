@@ -153,13 +153,18 @@ static uint32_t crc32_of(const uint8_t *data, size_t size) {
     return ~crc;
 }
 
+static void set_crc(uint8_t blob[BZ_SETTINGS_BLOB_SIZE]) {
+    uint32_t crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
+    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
+}
+
 static void test_settings_blob(void) {
     bz_settings_t a, b;
     uint8_t blob[BZ_SETTINGS_BLOB_SIZE];
     bz_settings_defaults(&a);
-    a.page = BZ_PAGE_DUO;
+    a.page = BZ_PAGE_ASIC;
     a.brightness = 1;
-    a.slots[BZ_PAGE_DUO][1] = BZ_M_POOL;
+    a.slots[BZ_PAGE_HERO][1] = BZ_M_POOL;
     bz_settings_encode(&a, blob);
     memset(&b, 0xee, sizeof(b));
     assert(bz_settings_decode(blob, &b) && !memcmp(&a, &b, sizeof(a)));
@@ -179,26 +184,36 @@ static void test_settings_blob(void) {
     assert(!bz_settings_decode(bad, &b));
     assert(!memcmp(&untouched, &b, sizeof(b)));
 
-    // Settings saved by firmware that still had a fourth (STUDIO) page load
-    // unchanged, landing on HERO if that page was the one selected.
+    // Settings saved by firmware with an earlier set of pages still load.
+    // HERO keeps its slots; a page that no longer exists lands on HERO.
+    // Version 1 was HERO, GRID, DUO, STUDIO; version 2 HERO, GRID, DUO, TARGET.
     a.slots[BZ_PAGE_HERO][0] = BZ_M_POOL;
     bz_settings_encode(&a, blob);
-    blob[6] = 3;                     // Selected page: the removed one
-    memset(&blob[9 + 3 * 6], 1, 6);  // Its slot row, as that firmware wrote it
-    uint32_t crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
-    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
-    assert(bz_settings_decode(blob, &b));
-    assert(b.page == BZ_PAGE_HERO && b.slots[BZ_PAGE_HERO][0] == BZ_M_POOL);
-    assert(b.slots[BZ_PAGE_DUO][1] == BZ_M_POOL);
-    // Byte 7 once chose between two big-digit styles; either value still loads.
-    blob[6] = BZ_PAGE_DUO;
-    blob[7] = 1;
-    crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
-    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
-    assert(bz_settings_decode(blob, &b) && b.page == BZ_PAGE_DUO);
+    assert(blob[4] == 3);
+    static const struct {
+        uint8_t version, page, expect;
+    } old[] = {{1, 0, BZ_PAGE_HERO}, {1, 1, BZ_PAGE_HERO}, {1, 2, BZ_PAGE_HERO}, {1, 3, BZ_PAGE_HERO},
+               {2, 0, BZ_PAGE_HERO}, {2, 1, BZ_PAGE_HERO}, {2, 2, BZ_PAGE_HERO}, {2, 3, BZ_PAGE_TARGET}};
+    for (size_t i = 0; i < sizeof(old) / sizeof(*old); ++i) {
+        blob[4] = old[i].version;
+        blob[6] = old[i].page;
+        blob[7] = 1;                    // The big-digit style those versions stored
+        memset(&blob[9 + 6], 7, 3 * 6); // The other pages' slots, as written then
+        set_crc(blob);
+        assert(bz_settings_decode(blob, &b) && b.page == old[i].expect && b.brightness == 1);
+        assert(b.slots[BZ_PAGE_HERO][0] == BZ_M_POOL && b.slots[BZ_PAGE_HERO][1] == BZ_M_POOL);
+        assert(b.slots[BZ_PAGE_TARGET][0] == BZ_M_NONE && b.slots[BZ_PAGE_ASIC][0] == BZ_M_NONE);
+    }
     blob[6] = 4; // Never a valid page
-    crc = crc32_of(blob, BZ_SETTINGS_BLOB_SIZE - 4);
-    for (int i = 0; i < 4; ++i) blob[BZ_SETTINGS_BLOB_SIZE - 4 + i] = (uint8_t)(crc >> (8 * i));
+    set_crc(blob);
+    assert(!bz_settings_decode(blob, &b));
+    bz_settings_encode(&a, blob);
+    blob[6] = BZ_PAGE_COUNT; // Nor in today's blobs
+    set_crc(blob);
+    assert(!bz_settings_decode(blob, &b));
+    blob[6] = 0;
+    blob[4] = 4; // A version from the future
+    set_crc(blob);
     assert(!bz_settings_decode(blob, &b));
 }
 
@@ -308,10 +323,10 @@ static void test_menu_other_settings(void) {
     const bz_settings_t *s = bz_app_settings();
 
     click();
-    click();  // LAYOUT picker
-    turn(1);  // HERO -> GRID
+    click();  // PAGE picker
+    turn(1);  // HERO -> TARGET
     click();
-    assert(s->page == BZ_PAGE_GRID);
+    assert(s->page == BZ_PAGE_TARGET);
     turn(2);  // BRIGHTNESS
     click();
     turn(-3);
@@ -323,27 +338,27 @@ static void test_menu_other_settings(void) {
     click();
     assert(s->brightness == 1 && last_brightness == 1);
 
-    // Each page has its own slots: DUO offers two.
+    // The metric menu edits HERO whichever page is showing.
     turn(-3);
     click();
-    turn(3);   // Stops on the last page
+    turn(5);   // Stops on the last page
     click();
-    assert(s->page == BZ_PAGE_DUO);
+    assert(s->page == BZ_PAGE_ASIC);
     turn(1);
-    click();   // METRICS
-    turn(10);  // < BACK, LEFT, RIGHT: stops on RIGHT
+    click();   // HERO METRICS
+    turn(10);  // Stops on LOW RIGHT
     click();
     turn(-100);
     click();
-    assert(s->slots[BZ_PAGE_DUO][1] == BZ_M_HASHRATE);
-    assert(s->slots[BZ_PAGE_HERO][1] == BZ_M_CHIP_TEMP); // Other pages untouched
+    assert(s->slots[BZ_PAGE_HERO][4] == BZ_M_HASHRATE && s->page == BZ_PAGE_ASIC);
+    assert(s->slots[BZ_PAGE_HERO][1] == BZ_M_CHIP_TEMP); // Other slots untouched
     hold();    // Back to SETUP
 
     // RESET ALL asks first.
     turn(2);
     click();
     click(); // NO, KEEP
-    assert(s->page == BZ_PAGE_DUO);
+    assert(s->page == BZ_PAGE_ASIC);
     click();
     turn(1);
     click(); // YES, RESET
@@ -372,13 +387,13 @@ static void test_page_flip(void) {
     boot_to_mining(1000);
     const bz_settings_t *s = bz_app_settings();
     turn(1);
-    assert(s->page == BZ_PAGE_GRID);
+    assert(s->page == BZ_PAGE_TARGET);
     turn(1);
-    assert(s->page == BZ_PAGE_DUO);
+    assert(s->page == BZ_PAGE_ASIC);
     turn(1);
     assert(s->page == BZ_PAGE_HERO); // Wraps around
     turn(-1);
-    assert(s->page == BZ_PAGE_DUO);
+    assert(s->page == BZ_PAGE_ASIC);
     assert(saves == 0); // Several quick flips...
     run(4000);
     assert(saves == 1); // ...cost one flash write.
@@ -390,12 +405,53 @@ static void test_page_flip(void) {
     bz_app_set_data(&data);
     run(100);
     turn(1);
-    assert(bz_app_mode() == BZ_MODE_BOOT && s->page == BZ_PAGE_DUO);
+    assert(bz_app_mode() == BZ_MODE_BOOT && s->page == BZ_PAGE_ASIC);
     // The menu is still reachable there.
     click();
     assert(bz_app_mode() == BZ_MODE_MENU);
     hold();
     assert(bz_app_mode() == BZ_MODE_BOOT);
+}
+
+static void test_u256(void) {
+    bz_u256_t v;
+    // Difficulty 1 is 0xFFFF followed by 208 zero bits.
+    assert(bz_u256_from_text("1", &v) && bz_u256_zeros(&v) == 8);
+    assert(v.be[4] == 0xff && v.be[5] == 0xff && v.be[3] == 0 && v.be[6] == 0);
+    assert(bz_u256_digit(&v, 8) == 15 && bz_u256_digit(&v, 12) == 0);
+    double one = bz_u256_difficulty(&v);
+    assert(one > 0.999 && one < 1.001);
+
+    // A rounded difficulty only vouches for the digits it carries.
+    assert(bz_u256_from_text("129.44T", &v) && bz_u256_zeros(&v) == 19 && v.digits == 23);
+    double network = bz_u256_difficulty(&v);
+    assert(network > 129.43e12 && network < 129.45e12);
+    bz_u256_t best;
+    assert(bz_u256_from_text("4.29G", &best) && best.digits == bz_u256_zeros(&best) + 2);
+    double ratio = bz_u256_ratio(&best, &v);
+    assert(ratio > 30100 && ratio < 30250);
+    assert(bz_u256_from_text("512", &best) && bz_u256_from_text("2k", &best) && bz_u256_from_text("3K", &best));
+    const char *bad[] = {"", "--", "-1", "abc", "1.2X", "1.2GG", "0", "nan", "inf"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); ++i) {
+        memset(&best, 0xee, sizeof(best));
+        assert(!bz_u256_from_text(bad[i], &best) && best.digits == 0);
+    }
+    memset(&best, 0, sizeof(best)); // No value: nothing to compare.
+    assert(bz_u256_zeros(&best) == 64 && bz_u256_difficulty(&best) == 0 && bz_u256_ratio(&best, &v) == 0);
+    bz_u256_from_difficulty(1e-12, 4, &best); // Easier than any hash: clamps.
+    assert(bz_u256_zeros(&best) == 0 && best.be[31] == 0xff);
+
+    char text[16];
+    bz_format_scaled(4.29e9, text, sizeof(text));
+    assert(!strcmp(text, "4.29G"));
+    bz_format_scaled(129.44e12, text, sizeof(text));
+    assert(!strcmp(text, "129.44T"));
+    bz_format_scaled(586.4, text, sizeof(text));
+    assert(!strcmp(text, "586"));
+    bz_format_scaled(999.996e3, text, sizeof(text));
+    assert(strlen(text) < 12);
+    bz_format_scaled(1e40, text, sizeof(text));
+    assert(strlen(text) < 12);
 }
 
 static unsigned lit_in(int x0, int y0, int x1, int y1) {
@@ -457,6 +513,121 @@ static void test_icons_and_hero_info(void) {
     assert(lit_in(210, 0, 255, 8) < status);
 }
 
+// Width of the solid bar that starts at x on row y.
+static int bar_width(int x, int y) {
+    int w = 0;
+    while (x + w < BZ_W && bz_fb[y * BZ_W + x + w]) ++w;
+    return w;
+}
+
+// The TARGET page draws each number's leading zeros as a bar, six pixels a
+// digit, and a line down from where the target's bar ends.
+static void test_target_page(void) {
+    bz_settings_t s;
+    bz_settings_defaults(&s);
+    s.page = BZ_PAGE_TARGET;
+    bz_settings_encode(&s, flash);
+    flash_valid = true;
+    boot_to_mining(1000);
+    assert(bz_app_settings()->page == BZ_PAGE_TARGET);
+    // Only difficulties, as today's host sends them: 19 and 15 zeros, and no
+    // latest share.
+    assert(bar_width(41, 10) == 19 * 6 + 1 && bar_width(41, 21) == 15 * 6 + 1);
+    assert(bar_width(41, 32) == 0);
+    unsigned footer = lit_in(0, 48, 255, 60);
+    assert(footer > 100);
+
+    // Exact values from a host that sends them.
+    bz_u256_from_difficulty(129.44e12, 6, &data.net_target);
+    bz_u256_from_difficulty(64e9, 20, &data.best_hash);
+    bz_u256_from_difficulty(600, 20, &data.last_hash);
+    data.net_target.digits = data.best_hash.digits = data.last_hash.digits = 64;
+    bz_app_set_data(&data);
+    run(100);
+    assert(bar_width(41, 10) == 19 * 6 + 1);
+    assert(bar_width(41, 21) == bz_u256_zeros(&data.best_hash) * 6 + 1);
+    assert(bar_width(41, 32) == bz_u256_zeros(&data.last_hash) * 6 + 1);
+    assert(bz_u256_zeros(&data.best_hash) == 16 && bz_u256_zeros(&data.last_hash) == 10);
+    assert(bz_fb[23 * BZ_W + 41 + 19 * 6] != 0 || bz_fb[24 * BZ_W + 41 + 19 * 6] != 0); // The line
+
+    // A share at or below the target is a block.
+    data.best_hash = data.net_target;
+    bz_app_set_data(&data);
+    run(100);
+    assert(lit_in(0, 48, 255, 60) != footer);
+
+    // Nothing known yet: no bars, and no line.
+    memset(&data.net_target, 0, sizeof(data.net_target));
+    memset(&data.best_hash, 0, sizeof(data.best_hash));
+    memset(&data.last_hash, 0, sizeof(data.last_hash));
+    data.net_diff[0] = data.best_diff[0] = '\0';
+    bz_app_set_data(&data);
+    run(100);
+    assert(bar_width(41, 10) == 0 && bar_width(41, 21) == 0 && lit_in(41, 19, 255, 31) < 200);
+}
+
+// The ASIC page: one row per chip, and the domain block steps through
+// hashrate, voltage and frequency.
+static void test_asic_page(void) {
+    bz_settings_t s;
+    bz_settings_defaults(&s);
+    s.page = BZ_PAGE_ASIC;
+    bz_settings_encode(&s, flash);
+    flash_valid = true;
+    boot_to_mining(1000);
+    assert(bz_app_settings()->page == BZ_PAGE_ASIC);
+    // A host that reports no per-chip detail: a notice, not an empty table.
+    unsigned waiting = lit_pixels();
+    assert(waiting > 300 && lit_in(0, 0, 255, 12) == 0);
+
+    data.asic_count = 4;
+    data.domain_count = 4;
+    for (int chip = 0; chip < 4; ++chip) {
+        bz_asic_t *a = &data.asics[chip];
+        a->temp_c = 56u + (uint32_t)chip;
+        a->voltage_mv = 2800;
+        a->frequency_mhz = 800;
+        a->hashrate_ghs = 740;
+        for (int d = 0; d < 4; ++d) {
+            a->domain_voltage_mv[d] = 700;
+            a->domain_frequency_mhz[d] = 800;
+            a->domain_hashrate_ghs[d] = 185;
+        }
+    }
+    bz_app_set_data(&data);
+    run(100);
+    // Four numbered rows, with numbers on both sides of the divider.
+    for (int chip = 0; chip < 4; ++chip) {
+        int y = 14 + chip * 12;
+        assert(bz_fb[y * BZ_W] != 0 && lit_in(12, y, 123, y + 7) > 60 && lit_in(131, y, 255, y + 7) > 60);
+    }
+    // The domain block changes view on its own; the chip block does not.
+    static uint8_t first[BZ_W * BZ_H];
+    memcpy(first, bz_fb, sizeof(first));
+    run(4000);
+    bool left_same = true, right_same = true;
+    for (int y = 0; y < BZ_H; ++y) {
+        left_same = left_same && !memcmp(&first[y * BZ_W], &bz_fb[y * BZ_W], 126);
+        right_same = right_same && !memcmp(&first[y * BZ_W + 131], &bz_fb[y * BZ_W + 131], 125);
+    }
+    assert(left_same && !right_same);
+    run(8000); // Three views in all: back to the first.
+    assert(!memcmp(first, bz_fb, sizeof(first)));
+
+    // Fewer chips and domains, and values the host left out.
+    for (int chips = 1; chips <= 4; ++chips) {
+        for (int domains = 0; domains <= 4; ++domains) {
+            data.asic_count = (uint8_t)chips;
+            data.domain_count = (uint8_t)domains;
+            data.asics[0].voltage_mv = chips % 2 ? BZ_UNKNOWN : 4000000000u;
+            data.asics[chips - 1].domain_hashrate_ghs[0] = BZ_UNKNOWN;
+            bz_app_set_data(&data);
+            run(4100);
+            assert(lit_in(0, 14 + chips * 12, 126, 63) == 0); // No row past the last chip
+        }
+    }
+}
+
 // Every page with every metric in every slot: exercises the drawing code
 // under the sanitizers.
 static void test_draw_everything(void) {
@@ -495,7 +666,10 @@ int main(void) {
     test_menu_changes_metrics(UINT32_MAX - 20000u); // Millisecond counter wraps mid-test
     test_menu_other_settings();
     test_page_flip();
+    test_u256();
     test_icons_and_hero_info();
+    test_target_page();
+    test_asic_page();
     test_draw_everything();
     puts("UI app tests passed");
     return 0;

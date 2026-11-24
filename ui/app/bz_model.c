@@ -1,6 +1,8 @@
 #include "bz_model.h"
 
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void bz_data_reset(bz_data_t *data) {
@@ -10,6 +12,89 @@ void bz_data_reset(bz_data_t *data) {
         data->voltage_mv = data->current_ma = data->fan_rpm = data->frequency_mhz =
         data->shares_accepted = data->shares_rejected = data->block_height = BZ_UNKNOWN;
     data->rssi_dbm = BZ_RSSI_UNKNOWN;
+    memset(data->asics, 0xff, sizeof(data->asics)); // Every field BZ_UNKNOWN
+}
+
+// ---- 256-bit targets and hashes ---------------------------------------------
+
+int bz_u256_digit(const bz_u256_t *value, int index) {
+    if (index < 0 || index > 63) return 0;
+    uint8_t byte = value->be[index / 2];
+    return index % 2 ? byte & 15 : byte >> 4;
+}
+
+int bz_u256_zeros(const bz_u256_t *value) {
+    int zeros = 0;
+    while (zeros < 64 && !bz_u256_digit(value, zeros)) ++zeros;
+    return zeros;
+}
+
+// As a double: only the top 53 bits survive, which is plenty to compare by.
+static double u256_approx(const bz_u256_t *value) {
+    double sum = 0;
+    for (int i = 0; i < 32; ++i) sum = sum * 256.0 + value->be[i];
+    return sum;
+}
+
+double bz_u256_difficulty(const bz_u256_t *value) {
+    double v = value->digits ? u256_approx(value) : 0;
+    return v > 0 ? ldexp(65535.0, 208) / v : 0; // Difficulty 1 is 0xFFFF << 208
+}
+
+double bz_u256_ratio(const bz_u256_t *value, const bz_u256_t *target) {
+    double t = target->digits ? u256_approx(target) : 0;
+    return value->digits && t > 0 ? u256_approx(value) / t : 0;
+}
+
+void bz_u256_from_difficulty(double difficulty, int significant, bz_u256_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!(difficulty > 0) || !isfinite(difficulty)) return;
+    // value = mantissa * 2^low, with a 53-bit mantissa.
+    int exponent;
+    double fraction = frexp(65535.0 / difficulty, &exponent);
+    uint64_t mantissa = (uint64_t)ldexp(fraction, 53);
+    int low = exponent + 208 - 53;
+    if (low + 53 > 256) {
+        memset(out->be, 0xff, sizeof(out->be)); // Easier than any 256-bit hash
+    } else {
+        for (int bit = 0; bit < 53; ++bit) {
+            int position = low + bit;
+            if ((mantissa >> bit & 1u) && position >= 0)
+                out->be[31 - position / 8] |= (uint8_t)(1u << (position % 8));
+        }
+    }
+    int digits = bz_u256_zeros(out) + (significant < 1 ? 1 : significant);
+    out->digits = (uint8_t)(digits > 64 ? 64 : digits);
+}
+
+bool bz_u256_from_text(const char *text, bz_u256_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (*text < '0' || *text > '9') return false;
+    char *end;
+    double value = strtod(text, &end);
+    static const char suffixes[] = "kMGTPE";
+    const char *suffix = *end ? strchr(suffixes, *end == 'K' ? 'k' : *end) : NULL;
+    if (*end && (!suffix || end[1])) return false;
+    for (int i = 0; suffix && i <= suffix - suffixes; ++i) value *= 1000.0;
+    // Each decimal digit the host printed is worth a little under one hex digit.
+    int decimal = 0;
+    for (const char *c = text; c != end; ++c) decimal += *c >= '0' && *c <= '9';
+    bz_u256_from_difficulty(value, decimal * 5 / 6, out);
+    return out->digits != 0;
+}
+
+void bz_format_scaled(double value, char *out, size_t size) {
+    static const char suffixes[] = " kMGTPE";
+    int scale = 0;
+    if (!(value >= 0) || !isfinite(value)) value = 0;
+    while (value >= 1000.0 && scale < 6) {
+        value /= 1000.0;
+        ++scale;
+    }
+    if (value > 99999.0) value = 99999.0;
+    unsigned long hundredths = (unsigned long)(value * 100.0 + 0.5);
+    if (scale == 0) snprintf(out, size, "%lu", (hundredths + 50) / 100);
+    else snprintf(out, size, "%lu.%02lu%c", hundredths / 100, hundredths % 100, suffixes[scale]);
 }
 
 // ---- Metric catalogue -------------------------------------------------------
@@ -139,44 +224,41 @@ void bz_metric_read(bz_metric_t metric, const bz_data_t *d, bz_reading_t *out) {
 
 // ---- Settings -----------------------------------------------------------------
 
-// The blob stores four rows of slots. The fourth belonged to a page that has
-// since been removed; keeping the layout lets settings saved by earlier
-// firmware load unchanged.
-#define BLOB_VERSION 1u
+// The blob has room for four rows of slots, one per page. The set of pages
+// has changed twice, so the version says which pages its numbers mean:
+//   1: HERO, GRID, DUO, STUDIO    2: HERO, GRID, DUO, TARGET
+//   3: HERO, TARGET, ASIC
+// Older blobs still load: HERO keeps its slots, and a page that is gone
+// lands on HERO.
+#define BLOB_VERSION 3u
 #define BLOB_PAGE_ROWS 4u
 #define BLOB_PAYLOAD (3u + BLOB_PAGE_ROWS * BZ_MAX_SLOTS)
 
-_Static_assert(BZ_PAGE_COUNT < BLOB_PAGE_ROWS, "settings blob has no room for another page");
+_Static_assert(BZ_PAGE_COUNT <= BLOB_PAGE_ROWS, "settings blob has no room for another page");
+_Static_assert(BZ_PAGE_HERO == 0, "HERO must stay the first row of the settings blob");
 
 int bz_page_slot_count(bz_page_t page) {
-    return page == BZ_PAGE_HERO ? 5 : page == BZ_PAGE_GRID ? 6 : page == BZ_PAGE_DUO ? 2 : 0;
+    return page == BZ_PAGE_HERO ? 5 : 0;
 }
 
 const char *bz_page_name(bz_page_t page) {
-    static const char *const names[BZ_PAGE_COUNT] = {"HERO", "GRID", "DUO"};
+    static const char *const names[BZ_PAGE_COUNT] = {"HERO", "TARGET", "ASIC"};
     return page < BZ_PAGE_COUNT ? names[page] : "?";
 }
 
 const char *bz_page_slot_name(bz_page_t page, int slot) {
     static const char *const hero[] = {"MAIN", "TOP LEFT", "TOP RIGHT", "LOW LEFT", "LOW RIGHT"};
-    static const char *const grid[] = {"TOP LEFT", "TOP MID", "TOP RIGHT",
-                                       "LOW LEFT", "LOW MID", "LOW RIGHT"};
-    static const char *const duo[] = {"LEFT", "RIGHT"};
     if (slot < 0 || slot >= bz_page_slot_count(page)) return "?";
-    return page == BZ_PAGE_HERO ? hero[slot] : page == BZ_PAGE_GRID ? grid[slot] : duo[slot];
+    return hero[slot];
 }
 
 void bz_settings_defaults(bz_settings_t *s) {
-    static const uint8_t slots[BZ_PAGE_COUNT][BZ_MAX_SLOTS] = {
-        [BZ_PAGE_HERO] = {BZ_M_HASHRATE, BZ_M_CHIP_TEMP, BZ_M_POWER, BZ_M_FAN, BZ_M_BEST_DIFF},
-        [BZ_PAGE_GRID] = {BZ_M_HASHRATE, BZ_M_BEST_DIFF, BZ_M_CHIP_TEMP,
-                          BZ_M_POWER, BZ_M_EFFICIENCY, BZ_M_FAN},
-        [BZ_PAGE_DUO] = {BZ_M_HASHRATE, BZ_M_CHIP_TEMP},
-    };
+    static const uint8_t hero[BZ_MAX_SLOTS] = {BZ_M_HASHRATE, BZ_M_CHIP_TEMP, BZ_M_POWER, BZ_M_FAN,
+                                               BZ_M_BEST_DIFF};
     memset(s, 0, sizeof(*s));
     s->page = BZ_PAGE_HERO;
     s->brightness = BZ_BRIGHTNESS_LEVELS - 1;
-    memcpy(s->slots, slots, sizeof(slots));
+    memcpy(s->slots[BZ_PAGE_HERO], hero, sizeof(hero));
 }
 
 static uint32_t crc32(const uint8_t *data, size_t size) {
@@ -207,13 +289,20 @@ void bz_settings_encode(const bz_settings_t *s, uint8_t blob[BZ_SETTINGS_BLOB_SI
 }
 
 bool bz_settings_decode(const uint8_t blob[BZ_SETTINGS_BLOB_SIZE], bz_settings_t *out) {
-    if (memcmp(blob, "BZUI", 4) || blob[4] != BLOB_VERSION || blob[5] != BLOB_PAYLOAD ||
+    if (memcmp(blob, "BZUI", 4) || blob[4] < 1u || blob[4] > BLOB_VERSION || blob[5] != BLOB_PAYLOAD ||
         crc32(blob, BZ_SETTINGS_BLOB_SIZE - 4) != stored_crc(blob)) return false;
     bz_settings_t s;
+    memset(&s, 0, sizeof(s));
     s.page = blob[6];
     s.brightness = blob[8];
-    memcpy(s.slots, &blob[9], sizeof(s.slots));
-    if (s.page == BLOB_PAGE_ROWS - 1u) s.page = BZ_PAGE_HERO; // Was on the removed page
+    if (blob[4] == BLOB_VERSION) {
+        memcpy(s.slots, &blob[9], sizeof(s.slots));
+    } else {
+        // An earlier set of pages: only HERO and TARGET are still here.
+        if (s.page >= BLOB_PAGE_ROWS) return false;
+        s.page = blob[4] == 2u && s.page == 3u ? BZ_PAGE_TARGET : BZ_PAGE_HERO;
+        memcpy(s.slots[BZ_PAGE_HERO], &blob[9], BZ_MAX_SLOTS);
+    }
     if (s.page >= BZ_PAGE_COUNT || s.brightness >= BZ_BRIGHTNESS_LEVELS) return false;
     for (int page = 0; page < BZ_PAGE_COUNT; ++page)
         for (int slot = 0; slot < BZ_MAX_SLOTS; ++slot)

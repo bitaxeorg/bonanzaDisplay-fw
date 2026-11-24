@@ -8,5 +8,5 @@ trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I"$project_dir/ui" \
     "$project_dir/tests/test_ui_app.c" "$project_dir"/ui/app/*.c \
-    -o "$test_dir/test_ui_app"
+    -lm -o "$test_dir/test_ui_app"
 "$test_dir/test_ui_app"

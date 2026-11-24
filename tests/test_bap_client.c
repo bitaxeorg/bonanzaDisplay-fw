@@ -51,6 +51,48 @@ static void test_metrics_and_stream(void) {
     assert(m.shares_accepted == 1532 && m.shares_rejected == 4 && m.block_height == 921034);
     assert(m.wifi_rssi_dbm == -58 && !strcmp(m.pool, "public-pool.io"));
     assert(!strcmp(m.network_difficulty, "129.44T") && !strcmp(m.hostname, "bitaxe-shop"));
+    // 256-bit values arrive as exactly 64 hex digits, most significant first.
+    assert(!m.has_network_target && !m.has_best_share_hash && !m.has_last_share_hash);
+    const char *target = "000000000000000000022cae0000000000000000000000000000000000000000";
+    receive(&c, "RES", "networkTarget", target, 2550);
+    receive(&c, "RES", "lastShareHash", "00000000006FCD0E32C8AF7D6F1000000000000000000000000000000000ABCD", 2550);
+    assert(bonanza_bap_client_take_update(&c, &m));
+    assert(m.has_network_target && m.has_last_share_hash && !m.has_best_share_hash);
+    assert(m.network_target[9] == 0x02 && m.network_target[10] == 0x2c && m.network_target[11] == 0xae);
+    assert(m.last_share_hash[5] == 0x6f && m.last_share_hash[31] == 0xcd);
+    const char *bad_hex[] = {"", "22cae", "000000000000000000022cae000000000000000000000000000000000000000",
+                             "000000000000000000022cae00000000000000000000000000000000000000000",
+                             "00000000000000000002zcae0000000000000000000000000000000000000000"};
+    for (size_t i = 0; i < sizeof(bad_hex) / sizeof(*bad_hex); ++i)
+        receive(&c, "RES", "bestShareHash", bad_hex[i], 2560);
+    bonanza_bap_client_take_update(&c, &m);
+    assert(!m.has_best_share_hash && m.network_target[10] == 0x2c);
+
+    // Per-chip tables: chips separated by ',', domains inside a chip by '/'.
+    assert(m.asic_count == 0 && m.domain_count == 0 && m.asic_temp_c[0] == BONANZA_METRIC_UNKNOWN);
+    receive(&c, "RES", "asicTemp", "58.4,57,60,59", 2570);
+    receive(&c, "RES", "asicHashrate", "752,748.6,760,741", 2570);
+    receive(&c, "RES", "domainVoltage", "1401/1399,1398/1402,1400/1400,1397/1403", 2570);
+    assert(bonanza_bap_client_take_update(&c, &m));
+    assert(m.asic_count == 4 && m.domain_count == 2);
+    assert(m.asic_temp_c[0] == 58 && m.asic_temp_c[3] == 59 && m.asic_hashrate_ghs[1] == 749);
+    assert(m.domain_voltage_mv[1][1] == 1402 && m.domain_voltage_mv[3][0] == 1397);
+    assert(m.domain_voltage_mv[0][2] == BONANZA_METRIC_UNKNOWN); // Past the reported domains
+    assert(m.asic_voltage_mv[0] == BONANZA_METRIC_UNKNOWN);      // Never sent
+    // Malformed tables leave the last good one alone.
+    const char *bad_tables[] = {"", ",", "1,", ",1", "1//2", "1/2,3", "1,2,3,4,5", "1/2/3/4/5", "x", "1,-2",
+                                "1,2/3", "1 ,2", "12345678901234567890"};
+    for (size_t i = 0; i < sizeof(bad_tables) / sizeof(*bad_tables); ++i) {
+        receive(&c, "RES", "domainVoltage", bad_tables[i], 2580);
+        receive(&c, "RES", "asicTemp", i == 5 ? "bad" : bad_tables[i], 2580);
+    }
+    receive(&c, "RES", "asicTemp", "1/2,3/4", 2580); // A chip list has one number per chip
+    bonanza_bap_client_take_update(&c, &m);
+    assert(m.asic_count == 4 && m.domain_count == 2 && m.asic_temp_c[0] == 58);
+    assert(m.domain_voltage_mv[1][1] == 1402);
+    receive(&c, "RES", "asicTemp", "61", 2590); // A single-chip board
+    assert(bonanza_bap_client_take_update(&c, &m));
+    assert(m.asic_count == 1 && m.asic_temp_c[0] == 61 && m.asic_temp_c[1] == BONANZA_METRIC_UNKNOWN);
     // Malformed share counts and signal strengths leave the last good values.
     const char *bad_more[][2] = {{"shares", "12"}, {"shares", "1/"}, {"shares", "/2"}, {"shares", "1/2/3"},
                                  {"shares", "-1/2"}, {"shares", "99999999999/1"}, {"wifi_rssi", "--5"},

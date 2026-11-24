@@ -18,6 +18,8 @@
 //        pool:<host name>              stratum host the pretend host reports
 //        netdiff:on|off                whether the host reports network difficulty
 //        hostname:<name>|off           host name the pretend host reports, if any
+//        hashes:on|off                 whether it reports the target and share hashes
+//        asics:<chips>x<domains>|off   per-chip detail it reports (default 4x4)
 //        expect:boot|mining|menu       fail unless the UI is in that mode
 //        set:<page>:<m,m,..>           store settings (metric ids) and power-cycle
 //        reboot  status
@@ -123,6 +125,90 @@ static double host_hashrate(void) {
     return (ramp > 1 ? 1 : ramp) * (3000.0 + host_drift) + jitter(60);
 }
 
+// Shares, the way a host that keeps their hashes would report them. Share
+// difficulties follow the real distribution: one in n is n times the floor.
+#define HOST_NET_DIFFICULTY 129.44e12
+#define HOST_SHARE_FLOOR 512.0
+static bool host_hashes = true; // Off imitates a host that only sends difficulties
+static double host_best_difficulty = 4.29e9;
+static bz_u256_t host_best_hash, host_last_hash;
+
+static uint32_t host_random(void) {
+    lcg = lcg * 1664525u + 1013904223u;
+    return lcg >> 8;
+}
+
+// A hash of that difficulty: the leading digits it implies, then noise.
+static void host_hash(double difficulty, bz_u256_t *out) {
+    bz_u256_from_difficulty(difficulty, 8, out);
+    for (int digit = out->digits; digit < 64; ++digit)
+        out->be[digit / 2] |= (uint8_t)((host_random() & 15u) << (digit % 2 ? 0 : 4));
+    out->digits = 64;
+}
+
+static void host_send_u256(const char *parameter, const bz_u256_t *value) {
+    char hex[65];
+    for (int i = 0; i < 32; ++i) snprintf(&hex[2 * i], 3, "%02x", value->be[i]);
+    host_send("RES", parameter, hex);
+}
+
+static void host_shares(void) {
+    if (!host_hashes || host_hashrate() <= 0) return;
+    if (!host_best_hash.digits) host_hash(host_best_difficulty, &host_best_hash);
+    if (!host_last_hash.digits || host_random() % 3u == 0) {
+        double difficulty = HOST_SHARE_FLOOR * 16777216.0 / (double)(1u + host_random() % 16777216u);
+        host_hash(difficulty, &host_last_hash);
+        if (difficulty > host_best_difficulty) {
+            host_best_difficulty = difficulty;
+            host_best_hash = host_last_hash;
+        }
+    }
+    // The network target is exact: a three-byte mantissa and zeros, from nBits.
+    bz_u256_t target;
+    bz_u256_from_difficulty(HOST_NET_DIFFICULTY, 6, &target);
+    for (int digit = target.digits; digit < 64; ++digit)
+        target.be[digit / 2] &= (uint8_t)(digit % 2 ? 0xf0 : 0x0f);
+    host_send_u256("networkTarget", &target);
+    host_send_u256("bestShareHash", &host_best_hash);
+    host_send_u256("lastShareHash", &host_last_hash);
+}
+
+// Per-chip detail, the way a host that reports it would send it: one list per
+// metric, chips separated by ',' and the domains inside a chip by '/'.
+static int host_asics = 4, host_domains = 4; // 0 chips: a host that does not report them
+
+static void host_table(const char *parameter, double base, double chip_spread, double domain_spread,
+                       double noise, int domains) {
+    // Fixed offsets, so each chip and domain keeps its own character.
+    static const double chip_offset[4] = {0.4, -0.7, 1.0, -0.3};
+    static const double domain_offset[4] = {0.6, -1.0, 0.2, -0.5};
+    char text[160];
+    size_t n = 0;
+    for (int chip = 0; chip < host_asics; ++chip) {
+        for (int domain = 0; domain < (domains ? domains : 1); ++domain) {
+            double value = base + chip_offset[chip] * chip_spread + jitter(noise);
+            if (domains) value += domain_offset[(domain + chip) % 4] * domain_spread;
+            n += (size_t)snprintf(&text[n], sizeof(text) - n, "%s%.0f",
+                                  domain ? "/" : chip ? "," : "", value < 0 ? 0 : value);
+        }
+    }
+    host_send("RES", parameter, text);
+}
+
+static void host_asic_detail(double hashrate) {
+    if (!host_asics) return;
+    double chip_rate = hashrate / host_asics;
+    host_table("asicTemp", 58, 2, 0, 0.6, 0);
+    host_table("asicHashrate", chip_rate, chip_rate * 0.03, 0, chip_rate * 0.01, 0);
+    host_table("asicFrequency", 800, 0, 0, 0, 0);
+    host_table("asicVoltage", 2800, 8, 0, 2, 0);
+    if (!host_domains) return;
+    host_table("domainHashrate", chip_rate / host_domains, chip_rate * 0.03 / host_domains,
+               chip_rate * 0.05 / host_domains, chip_rate * 0.02 / host_domains, host_domains);
+    host_table("domainVoltage", 2800.0 / host_domains, 2, 6, 1, host_domains);
+    host_table("domainFrequency", 800, 0, 12.5, 0, host_domains);
+}
+
 static void host_telemetry(void) {
     double hashrate = host_hashrate();
     host_sendf("hashrate", "%.2f", hashrate < 0 ? 0 : hashrate);
@@ -132,7 +218,11 @@ static void host_telemetry(void) {
     host_sendf("voltage", "%.2f", 12010 + jitter(25));
     host_sendf("current", "%.2f", hashrate > 0 ? 4580 + jitter(90) : 515);
     host_sendf("fan_speed", "%.0f", 4200 + jitter(80));
-    host_send("RES", "best_difficulty", "4.29G");
+    char best[16];
+    bz_format_scaled(host_best_difficulty, best, sizeof(best));
+    host_send("RES", "best_difficulty", best);
+    host_shares();
+    host_asic_detail(hashrate < 0 ? 0 : hashrate);
     char shares[32];
     snprintf(shares, sizeof(shares), "%lu/3", (unsigned long)(host_age() / 4000u));
     host_send("RES", "shares", shares);
@@ -373,6 +463,16 @@ int main(int argc, char **argv) {
             image_tint = tint_green;
         } else if (!strcmp(arg, "tint:gray")) {
             image_tint = tint_gray;
+        } else if (!strncmp(arg, "asics:", 6)) {
+            // asics:<chips>x<domains>, or asics:off
+            int chips = 0, domains = 0;
+            if (strcmp(arg + 6, "off") && (sscanf(arg + 6, "%dx%d", &chips, &domains) != 2 || chips < 1 ||
+                                           chips > 4 || domains < 0 || domains > 4))
+                return fail(arg, "expected asics:<1-4>x<0-4> or asics:off");
+            host_asics = chips;
+            host_domains = domains;
+        } else if (!strcmp(arg, "hashes:on") || !strcmp(arg, "hashes:off")) {
+            host_hashes = arg[8] == 'n';
         } else if (!strncmp(arg, "hostname:", 9)) {
             snprintf(host_hostname, sizeof(host_hostname), "%s", strcmp(arg + 9, "off") ? arg + 9 : "");
         } else if (!strncmp(arg, "pool:", 5)) {

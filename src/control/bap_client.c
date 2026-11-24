@@ -42,6 +42,13 @@ static void reset_metrics(bonanza_bap_client_t *client, const char *status,
     m->power_mw = m->vr_temp_c = m->voltage_mv = m->current_ma = m->shares_accepted =
         m->shares_rejected = m->block_height = BONANZA_METRIC_UNKNOWN;
     m->wifi_rssi_dbm = BONANZA_RSSI_UNKNOWN;
+    memset(m->asic_temp_c, 0xff, sizeof(m->asic_temp_c)); // Every entry unknown
+    memset(m->asic_voltage_mv, 0xff, sizeof(m->asic_voltage_mv));
+    memset(m->asic_frequency_mhz, 0xff, sizeof(m->asic_frequency_mhz));
+    memset(m->asic_hashrate_ghs, 0xff, sizeof(m->asic_hashrate_ghs));
+    memset(m->domain_voltage_mv, 0xff, sizeof(m->domain_voltage_mv));
+    memset(m->domain_frequency_mhz, 0xff, sizeof(m->domain_frequency_mhz));
+    memset(m->domain_hashrate_ghs, 0xff, sizeof(m->domain_hashrate_ghs));
     snprintf(m->device_family, sizeof(m->device_family), "BITAXE");
     snprintf(m->device_name, sizeof(m->device_name), "%s", status);
     snprintf(m->ip_address, sizeof(m->ip_address), "--");
@@ -116,6 +123,66 @@ static bool read_rssi(const char *value, int32_t *out) {
     return true;
 }
 
+// Exactly 64 hex digits: a 256-bit target or hash, most significant first.
+static bool read_hex256(const char *value, uint8_t out[32], bool *has) {
+    uint8_t bytes[32];
+    if (strlen(value) != 64) return false;
+    for (int i = 0; i < 32; ++i) {
+        int hi = hex_digit(value[2 * i]), lo = hex_digit(value[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        bytes[i] = (uint8_t)(hi << 4 | lo);
+    }
+    memcpy(out, bytes, sizeof(bytes));
+    *has = true;
+    return true;
+}
+
+// A table of numbers, one row per chip: chips are separated by ',' and the
+// domains inside a chip by '/'. "752,748" is two chips; "190/188,187/191" is
+// two chips of two domains. Every chip must list the same number of domains.
+// All or nothing: a malformed table leaves the previous one in place.
+static bool read_table(const char *value, uint32_t out[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS],
+                       uint8_t *rows, uint8_t *columns) {
+    uint32_t table[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS];
+    unsigned row = 0, column = 0, width = 0;
+    memset(table, 0xff, sizeof(table));
+    for (;;) {
+        char token[16];
+        size_t n = strcspn(value, ",/");
+        if (!n || n >= sizeof(token) || row >= BONANZA_MAX_ASICS || column >= BONANZA_MAX_DOMAINS)
+            return false;
+        memcpy(token, value, n);
+        token[n] = '\0';
+        if (!read_number(token, &table[row][column])) return false;
+        ++column;
+        value += n;
+        if (*value == '/') {
+            ++value;
+            continue;
+        }
+        if (row == 0) width = column;
+        else if (column != width) return false;
+        ++row;
+        column = 0;
+        if (!*value) break;
+        ++value; // The ',' before the next chip
+    }
+    memcpy(out, table, sizeof(table));
+    *rows = (uint8_t)row;
+    *columns = (uint8_t)width;
+    return true;
+}
+
+// One number per chip.
+static bool read_chip_list(const char *value, uint32_t out[BONANZA_MAX_ASICS], uint8_t *count) {
+    uint32_t table[BONANZA_MAX_ASICS][BONANZA_MAX_DOMAINS];
+    uint8_t rows, columns;
+    if (!read_table(value, table, &rows, &columns) || columns != 1) return false;
+    for (unsigned i = 0; i < BONANZA_MAX_ASICS; ++i) out[i] = table[i][0];
+    *count = rows;
+    return true;
+}
+
 static void handle_sentence(bonanza_bap_client_t *client, uint32_t now_ms) {
     char *body = client->sentence + 1;
     char *star = strchr(body, '*');
@@ -162,6 +229,26 @@ static void handle_sentence(bonanza_bap_client_t *client, uint32_t now_ms) {
         snprintf(m->network_difficulty, sizeof(m->network_difficulty), "%s", value);
     } else if (!strcmp(parameter, "hostname") && *value) {
         snprintf(m->hostname, sizeof(m->hostname), "%s", value); // Likewise
+    } else if (!strcmp(parameter, "asicTemp")) {
+        recognized = read_chip_list(value, m->asic_temp_c, &m->asic_count);
+    } else if (!strcmp(parameter, "asicVoltage")) {
+        recognized = read_chip_list(value, m->asic_voltage_mv, &m->asic_count);
+    } else if (!strcmp(parameter, "asicFrequency")) {
+        recognized = read_chip_list(value, m->asic_frequency_mhz, &m->asic_count);
+    } else if (!strcmp(parameter, "asicHashrate")) {
+        recognized = read_chip_list(value, m->asic_hashrate_ghs, &m->asic_count);
+    } else if (!strcmp(parameter, "domainVoltage")) {
+        recognized = read_table(value, m->domain_voltage_mv, &m->asic_count, &m->domain_count);
+    } else if (!strcmp(parameter, "domainFrequency")) {
+        recognized = read_table(value, m->domain_frequency_mhz, &m->asic_count, &m->domain_count);
+    } else if (!strcmp(parameter, "domainHashrate")) {
+        recognized = read_table(value, m->domain_hashrate_ghs, &m->asic_count, &m->domain_count);
+    } else if (!strcmp(parameter, "networkTarget")) {
+        recognized = read_hex256(value, m->network_target, &m->has_network_target);
+    } else if (!strcmp(parameter, "bestShareHash")) {
+        recognized = read_hex256(value, m->best_share_hash, &m->has_best_share_hash);
+    } else if (!strcmp(parameter, "lastShareHash")) {
+        recognized = read_hex256(value, m->last_share_hash, &m->has_last_share_hash);
     } else if (!strcmp(parameter, "shares")) {
         recognized = read_shares(value, &m->shares_accepted, &m->shares_rejected);
     } else if (!strcmp(parameter, "wifi_rssi")) {

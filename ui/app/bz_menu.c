@@ -9,8 +9,8 @@
 
 typedef enum {
     PAGE_ROOT,
-    PAGE_LAYOUT,      // Picker: which mining page
-    PAGE_METRICS,     // The slots of the current mining page
+    PAGE_LAYOUT,      // Picker: which page is shown while mining
+    PAGE_METRICS,     // The slots of the HERO page, the only one with any
     PAGE_PICK_METRIC, // Picker: metric for one slot
     PAGE_BRIGHTNESS,  // Picker
     PAGE_RESET,       // Confirm
@@ -54,7 +54,7 @@ static int item_count(void) {
     switch (m.page) {
     case PAGE_ROOT: return ROOT_COUNT;
     case PAGE_LAYOUT: return BZ_PAGE_COUNT;
-    case PAGE_METRICS: return 1 + bz_page_slot_count(mining_page());
+    case PAGE_METRICS: return 1 + bz_page_slot_count(BZ_PAGE_HERO);
     case PAGE_PICK_METRIC: return BZ_M_COUNT;
     case PAGE_BRIGHTNESS: return BZ_BRIGHTNESS_LEVELS;
     default: return 2;
@@ -65,7 +65,7 @@ static int item_count(void) {
 static uint8_t *picker_target(void) {
     switch (m.page) {
     case PAGE_LAYOUT: return &bz.settings.page;
-    case PAGE_PICK_METRIC: return &bz.settings.slots[mining_page()][m.slot];
+    case PAGE_PICK_METRIC: return &bz.settings.slots[BZ_PAGE_HERO][m.slot];
     default: return &bz.settings.brightness;
     }
 }
@@ -97,11 +97,11 @@ static void item_text(int index, char *label, size_t label_size, char *value, si
     case PAGE_ROOT:
         switch (index) {
         case ROOT_LAYOUT:
-            snprintf(label, label_size, "LAYOUT");
+            snprintf(label, label_size, "PAGE");
             snprintf(value, value_size, "%s", bz_page_name(mining_page()));
             break;
         case ROOT_METRICS:
-            snprintf(label, label_size, "METRICS");
+            snprintf(label, label_size, "HERO METRICS");
             snprintf(value, value_size, ">");
             break;
         case ROOT_BRIGHTNESS:
@@ -117,9 +117,9 @@ static void item_text(int index, char *label, size_t label_size, char *value, si
         if (index == 0) {
             snprintf(label, label_size, "< BACK");
         } else {
-            snprintf(label, label_size, "%s", bz_page_slot_name(mining_page(), index - 1));
+            snprintf(label, label_size, "%s", bz_page_slot_name(BZ_PAGE_HERO, index - 1));
             snprintf(value, value_size, "%s",
-                     bz_metric_name((bz_metric_t)bz.settings.slots[mining_page()][index - 1]));
+                     bz_metric_name((bz_metric_t)bz.settings.slots[BZ_PAGE_HERO][index - 1]));
         }
         break;
     case PAGE_PICK_METRIC: snprintf(label, label_size, "%s", bz_metric_name(metric_at(index))); break;
@@ -198,13 +198,12 @@ bool bz_menu_input(int steps, bz_press_t press) {
 // ---- Drawing --------------------------------------------------------------------
 
 static void draw_list(void) {
-    static const char *const titles[] = {"SETUP", "LAYOUT", "", "", "BRIGHTNESS", "RESET ALL?"};
+    static const char *const titles[] = {"SETUP", "PAGE", "", "", "BRIGHTNESS", "RESET ALL?"};
     char title[24], label[20], value[16];
     if (m.page == PAGE_METRICS) {
-        snprintf(title, sizeof(title), "%s METRICS", bz_page_name(mining_page()));
+        snprintf(title, sizeof(title), "HERO METRICS");
     } else if (m.page == PAGE_PICK_METRIC) {
-        snprintf(title, sizeof(title), "%s: %s", bz_page_name(mining_page()),
-                 bz_page_slot_name(mining_page(), m.slot));
+        snprintf(title, sizeof(title), "HERO: %s", bz_page_slot_name(BZ_PAGE_HERO, m.slot));
     } else {
         snprintf(title, sizeof(title), "%s", titles[m.page]);
     }
@@ -260,17 +259,19 @@ static void draw_preview(void) {
     case PAGE_RESET:
         bz_text(x + 3, 1, "FACTORY SETTINGS", BZ_FONT_TINY, BZ_MID);
         bz_text(x + 3, 14, "RESTORES THE", BZ_FONT_SMALL, BZ_WHITE);
-        bz_text(x + 3, 24, "DEFAULT PAGES AND", BZ_FONT_SMALL, BZ_WHITE);
-        bz_text(x + 3, 34, "METRICS.", BZ_FONT_SMALL, BZ_WHITE);
+        bz_text(x + 3, 24, "DEFAULT PAGE AND", BZ_FONT_SMALL, BZ_WHITE);
+        bz_text(x + 3, 34, "HERO METRICS.", BZ_FONT_SMALL, BZ_WHITE);
         break;
     default: {
+        // The metric menus always show HERO; the rest show the current page.
+        bool metrics = m.page == PAGE_METRICS || m.page == PAGE_PICK_METRIC;
+        bz_page_t shown = metrics ? BZ_PAGE_HERO : mining_page();
         char title[32];
-        snprintf(title, sizeof(title), "PAGE %d/%d: %s", bz.settings.page + 1, BZ_PAGE_COUNT,
-                 bz_page_name(mining_page()));
+        snprintf(title, sizeof(title), "PAGE %d/%d: %s", shown + 1, BZ_PAGE_COUNT, bz_page_name(shown));
         bz_text(x + 3, 1, title, BZ_FONT_TINY, BZ_MID);
         int highlight = m.page == PAGE_PICK_METRIC ? m.slot
                         : m.page == PAGE_METRICS ? m.cursor - 1 : -1;
-        bz_mining_draw_preview(x + 2, 10, highlight, m.page != PAGE_PICK_METRIC || blink);
+        bz_mining_draw_preview(x + 2, 10, shown, highlight, m.page != PAGE_PICK_METRIC || blink);
         break;
     }
     }

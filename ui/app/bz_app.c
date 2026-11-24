@@ -33,7 +33,7 @@ static struct {
     uint8_t shadow[BZ_W * BZ_H];
 } app;
 
-// ---- History for the graph and bar meters --------------------------------------
+// ---- History for the graph --------------------------------------
 
 static void stats_sample(void) {
     bool close_point = ++app.bucket_samples >= BZ_GRAPH_STEP_S;
@@ -43,7 +43,6 @@ static void stats_sample(void) {
         bz_metric_read((bz_metric_t)metric, &bz.data, &reading);
         bz_stat_t *stat = &bz.stats[metric];
         if (reading.gauge && reading.valid) {
-            if (reading.number > stat->session_max) stat->session_max = reading.number;
             stat->bucket_sum += reading.number;
             stat->bucket_count++;
         }
@@ -62,15 +61,6 @@ float bz_stat_point(bz_metric_t metric, int age) {
     const bz_stat_t *stat = &bz.stats[metric];
     if (age < 0 || age >= stat->graph_count) return BZ_GRAPH_GAP;
     return stat->graph[(stat->graph_head + BZ_GRAPH_POINTS - 1 - age) % BZ_GRAPH_POINTS];
-}
-
-float bz_stat_peak(bz_metric_t metric) {
-    float peak = 0;
-    for (int age = 0; age < bz.stats[metric].graph_count; ++age) {
-        float v = bz_stat_point(metric, age);
-        if (v > peak) peak = v;
-    }
-    return peak;
 }
 
 // ---- Settings -------------------------------------------------------------------
