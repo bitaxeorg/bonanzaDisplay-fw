@@ -1,5 +1,6 @@
 // Retro loading screen: a twinkling Bitaxe logo, a typed-out start-up log
-// that follows the real host start-up, and a dithered progress bar.
+// that follows the real host start-up, and a dithered progress bar. If the
+// host stays without WiFi, the WiFi setup screen (bz_wifi.c) takes its place.
 
 #include "bz_internal.h"
 
@@ -18,6 +19,9 @@
 #define MIN_COLD_MS 3500u    // Let the animation play even if the host is up
 #define READY_HOLD_MS 900u
 #define NO_HASH_MS 25000u    // Connected but idle: show the dashboard anyway
+// The host has no WiFi for the first few seconds of every start. Only after
+// this long without it is that a problem worth a screen of its own.
+#define WIFI_GRACE_MS 10000u
 
 static struct {
     bool cold;
@@ -31,6 +35,9 @@ static struct {
     bz_link_t last_link;
     bool said_link, said_host, said_wifi, said_asic, said_hash;
     uint32_t link_since;
+    uint32_t ap_since;   // When the host said it had no WiFi
+    bool wifi_setup;     // Showing the WiFi setup screen instead of the log
+    bool wifi_failed;    // The log's WiFi line ended in FAILED
     int progress;    // 0..1000
     uint8_t creep;
     bool ready;
@@ -94,7 +101,8 @@ static bool typing_finished(void) {
 }
 
 static int progress_target(void) {
-    return 100 + 250 * b.said_link + 150 * b.said_host + 150 * b.said_wifi + 100 * b.said_asic +
+    bool link = b.said_link || bz.data.link == BZ_LINK_AP_MODE; // A host without WiFi still talks
+    return 100 + 250 * link + 150 * b.said_host + 150 * b.said_wifi + 100 * b.said_asic +
            250 * b.said_hash;
 }
 
@@ -104,21 +112,32 @@ void bz_boot_tick(void) {
 
     // ---- Follow the host ------------------------------------------------------
     if (d->link != b.last_link) {
-        if (d->link != BZ_LINK_CONNECTED) b.wait_line = -1; // That step will not finish
         if (d->link == BZ_LINK_AP_MODE) {
-            push("HOST IN WIFI SETUP MODE");
-            push("JOIN THE BITAXE AP TO SETUP");
-        } else if (d->link == BZ_LINK_RESTARTING) {
-            push("HOST RESTARTING");
-        } else if (d->link == BZ_LINK_WAITING && b.last_link == BZ_LINK_CONNECTED) {
-            push("HOST LINK LOST");
+            // The host is talking but is not on WiFi.
+            if (b.last_link == BZ_LINK_CONNECTED || !b.count) {
+                b.wait_line = -1; // Whatever was in progress will not finish
+                push("WIFI CONNECTION LOST");
+            } else {
+                finish_wait("OK"); // The link line
+            }
+            push_wait("WIFI CONNECTING ... ");
+            b.ap_since = bz.now;
+        } else if (d->link != BZ_LINK_CONNECTED) {
+            b.wait_line = -1;
+            push(d->link == BZ_LINK_RESTARTING ? "HOST RESTARTING" : "HOST LINK LOST");
+            push_link_line();
         }
         if (d->link != BZ_LINK_CONNECTED) {
             b.said_link = b.said_host = b.said_wifi = b.said_asic = b.said_hash = false;
             b.ready = false;
-            push_link_line();
         }
+        if (d->link != BZ_LINK_AP_MODE && d->link != BZ_LINK_CONNECTED) b.wifi_failed = false;
         b.last_link = d->link;
+    }
+    b.wifi_setup = d->link == BZ_LINK_AP_MODE && bz.now - b.ap_since >= WIFI_GRACE_MS;
+    if (b.wifi_setup && !b.wifi_failed) {
+        b.wifi_failed = true;
+        finish_wait("FAILED");
     }
     if (d->link == BZ_LINK_CONNECTED) {
         bool hashing = d->hashrate_ghs != BZ_UNKNOWN && d->hashrate_ghs > 0;
@@ -126,7 +145,8 @@ void bz_boot_tick(void) {
             b.said_link = true;
             b.link_since = bz.now;
             if (b.wait_line >= 0) finish_wait("OK");
-            else push("BAP LINK OK");
+            else push(b.wifi_failed ? "WIFI CONNECTED" : "BAP LINK OK");
+            b.wifi_failed = false;
         }
         if (!b.said_host && *d->family && *d->asic) {
             b.said_host = true;
@@ -305,6 +325,10 @@ static void draw_progress(void) {
 }
 
 void bz_boot_draw(void) {
+    if (b.wifi_setup) {
+        bz_wifi_draw();
+        return;
+    }
     uint32_t t = bz.now - b.start;
     if (b.cold && t < CRT_BLANK_MS) return;
     if (b.cold && t < CRT_LINE_MS) {

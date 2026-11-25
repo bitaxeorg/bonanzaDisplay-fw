@@ -2,6 +2,7 @@
 
 #include "app/bz_app.h"
 #include "app/bz_internal.h"
+#include "app/bz_qr.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -628,6 +629,241 @@ static void test_asic_page(void) {
     }
 }
 
+// ---- QR codes -------------------------------------------------------------------
+
+static uint8_t qr_gf_mul(uint8_t a, uint8_t b) {
+    unsigned product = 0;
+    for (; b; b >>= 1) {
+        if (b & 1) product ^= a;
+        a = (uint8_t)((a << 1) ^ (a & 0x80 ? 0x11d : 0));
+    }
+    return (uint8_t)product;
+}
+
+static bool qr_is_fixed(int size, int x, int y) {
+    if (x == 6 || y == 6) return true;                                  // Timing lines
+    if ((x < 9 && y < 9) || (x >= size - 8 && y < 9) || (x < 9 && y >= size - 8)) return true;
+    return size > 21 && x >= size - 9 && x <= size - 5 && y >= size - 9 && y <= size - 5;
+}
+
+// Reads a code back the way a scanner would, written separately from the
+// encoder: both copies of the format information, the mask, the codewords,
+// the error correction check, then the text. Returns the text length, or -1
+// for anything that is not a sound code. *level gets 0..3 for L, M, Q, H.
+static int qr_read(const bz_qr_t *qr, char *text, size_t capacity, int *level) {
+    static const uint8_t totals[3] = {26, 44, 70};
+    static const uint8_t ec_table[3][4] = {{7, 10, 13, 17}, {10, 16, 22, 28}, {15, 26, 36, 44}};
+    static const int8_t level_of_bits[4] = {1, 0, 3, 2};
+    int size = qr->size;
+    if (size != 21 && size != 25 && size != 29) return -1;
+    int version = (size - 17) / 4;
+
+    unsigned first = 0, second = 0;
+    for (int i = 0; i <= 5; ++i) first |= (unsigned)bz_qr_dark(qr, 8, i) << i;
+    first |= (unsigned)bz_qr_dark(qr, 8, 7) << 6 | (unsigned)bz_qr_dark(qr, 8, 8) << 7 |
+             (unsigned)bz_qr_dark(qr, 7, 8) << 8;
+    for (int i = 9; i < 15; ++i) first |= (unsigned)bz_qr_dark(qr, 14 - i, 8) << i;
+    for (int i = 0; i < 8; ++i) second |= (unsigned)bz_qr_dark(qr, size - 1 - i, 8) << i;
+    for (int i = 8; i < 15; ++i) second |= (unsigned)bz_qr_dark(qr, 8, size - 15 + i) << i;
+    if (first != second || !bz_qr_dark(qr, 8, size - 8)) return -1;
+    unsigned format = first ^ 0x5412u, check = format;
+    for (int i = 14; i >= 10; --i)
+        if (check >> i & 1u) check ^= 0x537u << (i - 10);
+    if (check) return -1; // Not a valid format word
+    int ec_level = level_of_bits[format >> 13], mask = (int)(format >> 10 & 7u);
+    int total = totals[version - 1], ec = ec_table[version - 1][ec_level], count = total - ec;
+
+    uint8_t codewords[70] = {0};
+    int bit = 0;
+    for (int right = size - 1; right >= 1; right -= 2) {
+        if (right == 6) right = 5;
+        bool up = ((right + 1) & 2) == 0;
+        for (int step = 0; step < size; ++step)
+            for (int x = right; x > right - 2; --x) {
+                int y = up ? size - 1 - step : step;
+                if (qr_is_fixed(size, x, y) || bit >= total * 8) continue;
+                bool flip = mask == 0   ? (x + y) % 2 == 0
+                            : mask == 1 ? y % 2 == 0
+                            : mask == 2 ? x % 3 == 0
+                            : mask == 3 ? (x + y) % 3 == 0
+                            : mask == 4 ? (y / 2 + x / 3) % 2 == 0
+                            : mask == 5 ? x * y % 2 + x * y % 3 == 0
+                            : mask == 6 ? (x * y % 2 + x * y % 3) % 2 == 0
+                                        : ((x + y) % 2 + x * y % 3) % 2 == 0;
+                if (bz_qr_dark(qr, x, y) != flip) codewords[bit / 8] |= (uint8_t)(0x80 >> bit % 8);
+                ++bit;
+            }
+    }
+    if (bit != total * 8) return -1;
+
+    // A sound codeword sequence is zero at each of the generator's roots.
+    uint8_t root = 1;
+    for (int i = 0; i < ec; ++i, root = qr_gf_mul(root, 2)) {
+        uint8_t value = 0;
+        for (int j = 0; j < total; ++j) value = qr_gf_mul(value, root) ^ codewords[j];
+        if (value) return -1;
+    }
+
+    if (codewords[0] >> 4 != 4) return -1; // Byte mode
+    int length = (codewords[0] & 15) << 4 | codewords[1] >> 4;
+    if (length + 2 > count || (size_t)length >= capacity) return -1;
+    for (int i = 0; i < length; ++i)
+        text[i] = (char)((codewords[i + 1] & 15) << 4 | codewords[i + 2] >> 4);
+    text[length] = '\0';
+    if (level) *level = ec_level;
+    return length;
+}
+
+static void test_qr(void) {
+    bz_qr_t qr;
+    char text[64], back[64];
+    int level;
+
+    // Every length that fits comes back as it went in, in the smallest size.
+    for (int length = 1; length <= BZ_QR_MAX_TEXT; ++length) {
+        for (int i = 0; i < length; ++i) text[i] = (char)(' ' + (i * 37 + length * 11) % 95);
+        text[length] = '\0';
+        assert(bz_qr_encode(text, &qr));
+        assert(qr.size == (length <= 17 ? 21 : length <= 32 ? 25 : 29));
+        assert(qr_read(&qr, back, sizeof(back), &level) == length && !strcmp(back, text));
+        // Three finders, a light ring inside each.
+        assert(bz_qr_dark(&qr, 0, 0) && !bz_qr_dark(&qr, 1, 1) && bz_qr_dark(&qr, 3, 3));
+        assert(bz_qr_dark(&qr, qr.size - 1, 0) && bz_qr_dark(&qr, 0, qr.size - 1));
+        assert(!bz_qr_dark(&qr, 7, 7) && !bz_qr_dark(&qr, qr.size, 0) && !bz_qr_dark(&qr, -1, 0));
+        // Bytes above 127 too.
+        for (int i = 0; i < length; ++i) text[i] = (char)(0x80 + (i * 53 + length) % 128);
+        assert(bz_qr_encode(text, &qr) && qr_read(&qr, back, sizeof(back), NULL) == length);
+        assert(!memcmp(back, text, (size_t)length));
+    }
+    memset(text, 'x', 54);
+    text[54] = '\0';
+    assert(!bz_qr_encode(text, &qr) && !bz_qr_encode("", &qr));
+
+    // Spare room goes to error correction: H, Q, M, then L as the text grows.
+    static const struct {
+        int length, size, level;
+    } cases[] = {{7, 21, 3}, {8, 21, 2}, {11, 21, 2}, {12, 21, 1}, {14, 21, 1}, {15, 21, 0},
+                 {14 + 4, 25, 2}, {20, 25, 2}, {21, 25, 1}, {26, 25, 1}, {27, 25, 0},
+                 {33, 29, 1}, {42, 29, 1}, {43, 29, 0}};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        memset(text, 'a', (size_t)cases[i].length);
+        text[cases[i].length] = '\0';
+        assert(bz_qr_encode(text, &qr) && qr.size == cases[i].size);
+        assert(qr_read(&qr, back, sizeof(back), &level) == cases[i].length && level == cases[i].level);
+    }
+
+    // The reader is not fooled by a damaged code.
+    assert(bz_qr_encode("WIFI:S:Bitaxe_A1B2;;", &qr) && qr.size == 25);
+    assert(qr_read(&qr, back, sizeof(back), &level) == 20 && level == 2);
+    qr.rows[12] ^= 1u << 14;
+    assert(qr_read(&qr, back, sizeof(back), NULL) < 0);
+}
+
+// ---- WiFi setup screen ------------------------------------------------------------
+
+// The code on the WiFi setup screen, read back from the frame's pixels.
+// Returns false if there is no sound code there.
+static bool screen_code(char *text, size_t capacity) {
+    const int field_x = BZ_W - 62, field_y = 1;
+    for (int size = 21; size <= 29; size += 4) {
+        bz_qr_t qr = {.size = (uint8_t)size};
+        int origin = (62 - size * 2) / 2;
+        bool whole = true;
+        for (int y = 0; y < size; ++y)
+            for (int x = 0; x < size; ++x) {
+                const uint8_t *px = &bz_fb[(field_y + origin + y * 2) * BZ_W + field_x + origin + x * 2];
+                // Each module is two pixels square, all dark or all lit.
+                if (px[0] != px[1] || px[0] != px[BZ_W] || px[0] != px[BZ_W + 1] ||
+                    (px[0] != 0 && px[0] != 255)) whole = false;
+                if (!px[0]) qr.rows[y] |= 1u << x;
+            }
+        // A lit margin all round, at least a module wide.
+        for (int i = 0; i < 62; ++i)
+            for (int j = 0; j < 2; ++j)
+                if (!bz_fb[(field_y + j) * BZ_W + field_x + i] || !bz_fb[(field_y + 61 - j) * BZ_W + field_x + i] ||
+                    !bz_fb[(field_y + i) * BZ_W + field_x + j] || !bz_fb[(field_y + i) * BZ_W + field_x + 61 - j])
+                    whole = false;
+        if (whole && qr_read(&qr, text, capacity, NULL) > 0) return true;
+    }
+    return false;
+}
+
+static void test_wifi_setup(void) {
+    char text[64];
+    flash_valid = false;
+    now = 1000;
+    bz_app_init(&platform, now);
+
+    // A host without WiFi is normal for the first seconds of a start: the
+    // loading screen stays up.
+    bz_data_reset(&data);
+    data.link = BZ_LINK_AP_MODE;
+    bz_app_set_data(&data);
+    run(9500);
+    assert(bz_app_mode() == BZ_MODE_BOOT && !screen_code(text, sizeof(text)));
+
+    // Still none: the setup screen, with a code that opens the setup page,
+    // since this host has not said what its network is called.
+    run(1000);
+    assert(bz_app_mode() == BZ_MODE_BOOT && screen_code(text, sizeof(text)));
+    assert(!strcmp(text, "http://192.168.4.1"));
+    assert(lit_in(0, 0, 188, 17) > 100);   // The headline
+    assert(lit_in(190, 0, 193, 63) == 0);    // Nothing crowds the code
+    // The headline's marker blinks.
+    unsigned marker = lit_in(0, 0, 11, 15);
+    run(500);
+    assert(lit_in(0, 0, 11, 15) != marker);
+
+    // A host that names its network gets a code that joins it.
+    snprintf(data.ap_ssid, sizeof(data.ap_ssid), "Bitaxe_A1B2");
+    bz_app_set_data(&data);
+    run(100);
+    assert(screen_code(text, sizeof(text)) && !strcmp(text, "WIFI:S:Bitaxe_A1B2;;"));
+    // Characters with a meaning in the code are escaped.
+    snprintf(data.ap_ssid, sizeof(data.ap_ssid), "a;b,c:d\"e\\f");
+    bz_app_set_data(&data);
+    run(100);
+    assert(screen_code(text, sizeof(text)) && !strcmp(text, "WIFI:S:a\\;b\\,c\\:d\\\"e\\\\f;;"));
+    // The longest name still fits; one too long to encode falls back to the page.
+    snprintf(data.ap_ssid, sizeof(data.ap_ssid), "abcdefghijklmnopqrstuvwxyz012345");
+    bz_app_set_data(&data);
+    run(100);
+    assert(screen_code(text, sizeof(text)) && !strcmp(text, "WIFI:S:abcdefghijklmnopqrstuvwxyz012345;;"));
+    assert(lit_in(190, 0, 193, 63) == 0);
+    snprintf(data.ap_ssid, sizeof(data.ap_ssid), ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    bz_app_set_data(&data);
+    run(100);
+    assert(screen_code(text, sizeof(text)) && !strcmp(text, "http://192.168.4.1"));
+
+    // The dial still opens the setup menu from here.
+    click();
+    assert(bz_app_mode() == BZ_MODE_MENU);
+    push(900);
+    assert(bz_app_mode() == BZ_MODE_BOOT && screen_code(text, sizeof(text)));
+
+    // WiFi comes up: back to the loading screen, then on to mining.
+    host_up();
+    run(100);
+    assert(bz_app_mode() == BZ_MODE_BOOT && !screen_code(text, sizeof(text)));
+    run(6000);
+    assert(bz_app_mode() == BZ_MODE_MINING);
+
+    // WiFi drops while mining: the same wait, then the setup screen again.
+    bz_data_reset(&data);
+    data.link = BZ_LINK_AP_MODE;
+    snprintf(data.ap_ssid, sizeof(data.ap_ssid), "Bitaxe_A1B2");
+    bz_app_set_data(&data);
+    run(9000);
+    assert(bz_app_mode() == BZ_MODE_BOOT && !screen_code(text, sizeof(text)));
+    run(1500);
+    assert(screen_code(text, sizeof(text)) && !strcmp(text, "WIFI:S:Bitaxe_A1B2;;"));
+    // A restart (as after saving WiFi settings) clears it straight away.
+    data.link = BZ_LINK_RESTARTING;
+    bz_app_set_data(&data);
+    run(100);
+    assert(!screen_code(text, sizeof(text)));
+}
+
 // Every page with every metric in every slot: exercises the drawing code
 // under the sanitizers.
 static void test_draw_everything(void) {
@@ -670,6 +906,8 @@ int main(void) {
     test_icons_and_hero_info();
     test_target_page();
     test_asic_page();
+    test_qr();
+    test_wifi_setup();
     test_draw_everything();
     puts("UI app tests passed");
     return 0;

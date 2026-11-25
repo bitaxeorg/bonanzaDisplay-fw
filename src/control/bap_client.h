@@ -34,6 +34,7 @@ typedef struct {
     char pool[48];
     char network_difficulty[16]; // Empty until a host that reports it does
     char hostname[33];           // Likewise; ESP-Miner host names are at most 32 long
+    char ap_ssid[33];            // Name of the host's setup network, from hosts that say it
     // Per-chip detail from hosts that send it. The counts are 0 until then,
     // and entries past them are BONANZA_METRIC_UNKNOWN.
     uint8_t asic_count, domain_count;

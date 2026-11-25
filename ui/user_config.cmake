@@ -11,4 +11,6 @@ list(
   ${CMAKE_CURRENT_LIST_DIR}/app/bz_menu.c
   ${CMAKE_CURRENT_LIST_DIR}/app/bz_mining.c
   ${CMAKE_CURRENT_LIST_DIR}/app/bz_model.c
-  ${CMAKE_CURRENT_LIST_DIR}/app/bz_target.c)
+  ${CMAKE_CURRENT_LIST_DIR}/app/bz_qr.c
+  ${CMAKE_CURRENT_LIST_DIR}/app/bz_target.c
+  ${CMAKE_CURRENT_LIST_DIR}/app/bz_wifi.c)

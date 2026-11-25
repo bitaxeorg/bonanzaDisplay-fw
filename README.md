@@ -27,6 +27,7 @@ perform the hardware-timed transfer.
 - **Double-buffered** full-screen render mode
 - **Px437 FMTowns and Portfolio** 1bpp bitmap fonts shared with `bitaxe-lcd`
 - **Retro UI**: loading screen, three mining pages, and a dial-driven setup menu
+- **WiFi setup screen** with a QR code, for a Bitaxe that cannot get onto WiFi
 - **Selectable metrics** for every slot of every mining page, saved in flash
 - **Desktop simulator** and host tests; no board needed to work on the UI
 
@@ -38,7 +39,8 @@ bright as it looks on the panel. Each is the full 256×64 display.
 
 | Mode | When | What it shows |
 | --- | --- | --- |
-| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, enters WiFi setup, or stops responding | A twinkling Bitaxe logo, a typed-out start-up log that follows the real BAP link, and a checkered progress bar along the bottom |
+| **Loading** | From power-up until the host is connected and hashing; again whenever the host restarts, loses WiFi, or stops responding | A twinkling Bitaxe logo, a typed-out start-up log that follows the real BAP link, and a checkered progress bar along the bottom |
+| **WiFi setup** | In place of the loading screen, once the host has been without WiFi for ten seconds | That the Bitaxe cannot connect, the three steps to fix it, and a QR code to scan |
 | **Mining** | While the host is connected | One of three pages of live metrics |
 | **Setup** | After pushing the dial | Menus on the left, a live preview of the result on the right |
 
@@ -53,20 +55,57 @@ The start-up log reads, in order:
 | `BONANZA DISPLAY V0.1.0` | Power-up. The number is this firmware's [version](#firmware-version) |
 | `BUILD e4cac89` | Power-up. The git revision the firmware was built from |
 | `BAP LINK 115200-8N1 ... OK` | `OK` once the host first answers; a spinner until then |
+| `WIFI CONNECTING ... OK` | Only if the host answers before it has WiFi, which ESP-Miner does for the first few seconds of every start; `OK` once it connects |
 | `HOST Bonanza BZM` | The host has reported its model and ASIC |
 | `WIFI 192.168.1.234` | The host has joined WiFi and reported its address |
 | `BZM INIT ... OK` | Shown with a spinner as soon as WiFi is up, because ESP-Miner only powers up and initialises the ASIC chain after that; `OK` when hashrate first appears |
 | `HASHING 3.00 TH/s` | First nonzero hashrate; the mining screen follows a moment later |
 
-A host restart, WiFi setup mode, or a lost link adds its own line (`HOST
-RESTARTING`, `HOST IN WIFI SETUP MODE`, `HOST LINK LOST`) and starts the
-sequence again from the link line. If the host is connected for 25 seconds
-without reporting any hashrate, the log says `NO HASHRATE YET. STANDBY` and
-the mining screen is shown anyway.
+A host restart or a lost link adds its own line (`HOST RESTARTING`, `HOST
+LINK LOST`) and starts the sequence again from the link line; WiFi dropping
+while mining adds `WIFI CONNECTION LOST` and starts again from the WiFi line.
+If the host is connected for 25 seconds without reporting any hashrate, the
+log says `NO HASHRATE YET. STANDBY` and the mining screen is shown anyway.
 
-| Loading | Loading, host in WiFi setup mode |
+![Loading screen](docs/screens/loading.png)
+
+### WiFi setup screen
+
+A Bitaxe that is not on WiFi, because it is new, its network has gone, or its
+password is wrong, starts its own open WiFi network so that it can be set up.
+ESP-Miner tells the display it is in that state (`CMD,mode,ap_mode`). It is
+also in that state for the first few seconds of every normal start, so the
+display waits: the log line `WIFI CONNECTING ...` spins for ten seconds, and
+only then does this screen replace the loading screen.
+
+![WiFi setup screen](docs/screens/wifi-setup.png)
+
+| Part | What it says |
 | --- | --- |
-| ![Loading screen](docs/screens/loading.png) | ![Loading screen in WiFi setup mode](docs/screens/loading-wifi-setup.png) |
+| Headline | `CAN'T CONNECT TO WIFI`, with a blinking marker |
+| Step 1 | The name of the Bitaxe's setup network to join, as it appears in a phone's WiFi list |
+| Step 2 | The address of the setup page, `192.168.4.1`. Most phones open it by themselves after joining |
+| Step 3 | What to do there |
+| QR code | Scanning it with a phone camera joins the setup network. The `SCAN` tag marks the step the code takes care of |
+
+The code is dark on a lit square, two panel pixels per module, with a lit
+margin all round. It is made on the display by a small encoder in
+[`ui/app/bz_qr.c`](ui/app/bz_qr.c) (byte mode, versions 1 to 3, the strongest
+error correction that fits), and says `WIFI:S:<name>;;`, the same wording
+ESP-Miner's own screen uses for its open setup network.
+
+ESP-Miner does not yet tell the display what its setup network is called (see
+[the host notes](docs/host-bap-todo.md)). Until it does, step 1 shows the
+pattern `Bitaxe_XXXX`, where a real Bitaxe has the last four digits of its MAC
+address, and the code holds the link `http://192.168.4.1` instead: it opens
+the setup page once the phone has joined by hand, and the `SCAN` tag moves to
+step 2 to say so.
+
+![WiFi setup screen without the network name](docs/screens/wifi-setup-no-name.png)
+
+The screen goes away as soon as the host connects to WiFi or restarts, and
+the loading screen carries on from there. Pushing the dial still opens the
+display's own setup menu.
 
 ### Dial controls
 
@@ -333,7 +372,7 @@ receive errors discard buffered input and restart framing at the next `$`.
 | `RES` | Host → display | Supply one field from a request or subscription |
 | `ACK` | Host → display | Acknowledge a subscription; `subscribed` is the normal value |
 | `ERR` | Host → display | Report an error; does not update metrics or mark the display connected |
-| `CMD` | Host → display | `mode,ap_mode` clears metrics and shows `Host WiFi AP` |
+| `CMD` | Host → display | `mode,ap_mode` clears metrics; the host has no WiFi and is running its setup network |
 | `STA` | Host → display | `status,restarting` clears metrics; `subscription_timeout` schedules renewal |
 
 Only recognized, valid `RES` fields update metrics and the connection's last
@@ -429,6 +468,7 @@ partially parsed numeric values are rejected.
 | `pool` | `public-pool.io` | Stratum host name |
 | `networkDifficulty` | `129.44T` | Host-formatted network difficulty string |
 | `hostname` | `bitaxe` | Host name on the `HERO` device line |
+| `apSsid` | `Bitaxe_A1B2` | Name of the host's WiFi setup network, for the [WiFi setup screen](#wifi-setup-screen). Sent in AP mode; does not mark the link connected |
 | `networkTarget` | 64 hex digits | Network target on the `TARGET` page |
 | `bestShareHash` | 64 hex digits | Lowest share hash on the `TARGET` page |
 | `lastShareHash` | 64 hex digits | Most recent share hash on the `TARGET` page |
@@ -483,7 +523,7 @@ truncated to 31, 15, 15, 31, and 47 characters, respectively.
 | Connected, 60 seconds after a subscription sequence finishes | Repeat the request/subscription sequence to renew subscriptions |
 | No recognized responses for 30 seconds | Clear stale metrics and return to the loading screen (`HOST LINK LOST`) |
 | Disconnected, 10 seconds after a sequence finishes | Retry the request/subscription sequence, including when the first attempt received no replies |
-| `CMD,mode,ap_mode` | Clear metrics and show the loading screen in its `SETUP` state; retry until normal host responses resume |
+| `CMD,mode,ap_mode` | Clear metrics, keeping any `apSsid`; show the loading screen (`WIFI CONNECTING ...`), then the WiFi setup screen after ten seconds of it; retry until normal host responses resume |
 | `STA,status,restarting` | Clear metrics and show the loading screen (`HOST RESTARTING`); retry until normal host responses resume |
 | `STA,<parameter>,subscription_timeout` | Make subscription renewal due on the next client service call |
 
@@ -497,6 +537,8 @@ In host AP mode, ESP-Miner rejects normal requests and subscriptions with
 `ERR,<parameter>,ap_mode_no_requests` or
 `ERR,<parameter>,ap_mode_no_subscriptions`. The accessory ignores these errors
 and keeps retrying. The periodic AP-mode command supplies the visible status.
+`RES,apSsid,<name>` is the one response read in AP mode, and unlike every
+other `RES` it leaves the link state as it is.
 All LVGL updates run in the main loop; the UART interrupt only buffers bytes.
 
 This describes the implemented bonanzaDisplay subset of BAP. The matching
@@ -587,7 +629,9 @@ All three use AddressSanitizer and UndefinedBehaviorSanitizer.
 - `test_ui.sh` drives the UI state machine through the dial: loading to mining
   and back, every setup menu, cancel and timeout, saved settings across a
   power cycle, rejected settings blobs, timer wraparound, and drawing every
-  metric in every slot of every page.
+  metric in every slot of every page. It also reads QR codes back with its
+  own decoder: every text length the encoder takes, and the code on the WiFi
+  setup screen straight from the frame's pixels.
 - `test_ui_lvgl.sh` builds LVGL for the host with the firmware's `lv_conf.h`
   and checks that what LVGL flushes to the panel is exactly the UI's
   framebuffer on the loading screen, every mining page, and the setup menu.
@@ -710,6 +754,8 @@ bonanzaDisplay/
 │   ├── app/                    # Retro UI: plain C, no LVGL or Pico SDK
 │   │   ├── bz_app.c            # Modes, dial input, settings, metric history
 │   │   ├── bz_boot.c           # Loading screen
+│   │   ├── bz_wifi.c           # WiFi setup screen
+│   │   ├── bz_qr.c             # QR code encoder for that screen
 │   │   ├── bz_mining.c         # HERO overview page and its history graph
 │   │   ├── bz_asic.c           # ASIC page: every chip and its domains
 │   │   ├── bz_target.c         # TARGET page: target and share hashes in hex

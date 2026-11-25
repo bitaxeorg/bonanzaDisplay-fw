@@ -24,6 +24,7 @@ static inline void bonanza_ui_data_from_metrics(const bonanza_metrics_t *m, bz_d
     snprintf(d->pool, sizeof(d->pool), "%s", m->pool);
     snprintf(d->net_diff, sizeof(d->net_diff), "%s", m->network_difficulty);
     snprintf(d->hostname, sizeof(d->hostname), "%s", m->hostname);
+    snprintf(d->ap_ssid, sizeof(d->ap_ssid), "%s", m->ap_ssid);
     // Both sides mark unknown numbers with UINT32_MAX / INT32_MIN.
     d->hashrate_ghs = m->hashrate_ghs;
     d->chip_temp_c = m->temperature_c;

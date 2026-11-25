@@ -45,6 +45,9 @@ void bz_boot_enter(bool cold);
 void bz_boot_tick(void);
 bool bz_boot_done(void);
 void bz_boot_draw(void);
+// The WiFi setup screen, in bz_wifi.c: the loading screen draws it in place
+// of itself once the host has been without WiFi for a while.
+void bz_wifi_draw(void);
 
 // ---- Metric icons -----------------------------------------------------------
 #define BZ_ICON_SIZE 9

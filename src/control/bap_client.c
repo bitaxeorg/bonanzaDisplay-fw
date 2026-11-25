@@ -202,8 +202,23 @@ static void handle_sentence(bonanza_bap_client_t *client, uint32_t now_ms) {
 
     if ((!strcmp(command, "CMD") && !strcmp(parameter, "mode") && !strcmp(value, "ap_mode")) ||
         (!strcmp(command, "STA") && !strcmp(parameter, "status") && !strcmp(value, "restarting"))) {
-        if (!strcmp(value, "ap_mode")) reset_metrics(client, "Host WiFi AP", BONANZA_LINK_AP_MODE);
-        else reset_metrics(client, "Host restarting", BONANZA_LINK_RESTARTING);
+        if (!strcmp(value, "ap_mode")) {
+            // The host repeats this every few seconds; keep the network name
+            // it sent alongside.
+            char ap_ssid[sizeof(client->metrics.ap_ssid)];
+            memcpy(ap_ssid, client->metrics.ap_ssid, sizeof(ap_ssid));
+            reset_metrics(client, "Host WiFi AP", BONANZA_LINK_AP_MODE);
+            memcpy(client->metrics.ap_ssid, ap_ssid, sizeof(ap_ssid));
+        } else {
+            reset_metrics(client, "Host restarting", BONANZA_LINK_RESTARTING);
+        }
+        return;
+    }
+    if (!strcmp(command, "RES") && !strcmp(parameter, "apSsid")) {
+        // Sent in WiFi setup mode by hosts that have it. It does not mean the
+        // host is connected, so it leaves the link state alone.
+        snprintf(client->metrics.ap_ssid, sizeof(client->metrics.ap_ssid), "%s", value);
+        client->update_pending = true;
         return;
     }
     if (!strcmp(command, "STA") && !strcmp(value, "subscription_timeout")) {

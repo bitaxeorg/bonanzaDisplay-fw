@@ -18,6 +18,7 @@
 //        pool:<host name>              stratum host the pretend host reports
 //        netdiff:on|off                whether the host reports network difficulty
 //        hostname:<name>|off           host name the pretend host reports, if any
+//        apssid:<name>|off             setup network name it reports in WiFi setup mode
 //        hashes:on|off                 whether it reports the target and share hashes
 //        asics:<chips>x<domains>|off   per-chip detail it reports (default 4x4)
 //        expect:boot|mining|menu       fail unless the UI is in that mode
@@ -116,6 +117,7 @@ static double host_drift;
 static bool host_net_diff = true;
 static char host_pool[48] = "public-pool.io";
 static char host_hostname[33] = "bitaxe"; // Empty: a host that does not report one
+static char host_ap_ssid[33] = "Bitaxe_A1B2"; // Likewise, for its WiFi setup network
 
 static double host_hashrate(void) {
     host_drift = host_drift * 0.985 + jitter(14);
@@ -257,8 +259,10 @@ static void host_receive(const char *sentence) {
 static void host_poll(void) {
     if ((int32_t)(now_ms - host_next_update) < 0) return;
     host_next_update = now_ms + 1000;
-    if (host_mode == HOST_AP) host_send("CMD", "mode", "ap_mode");
-    else if (host_mode == HOST_UP || (host_mode == HOST_BOOT && host_age() >= 600)) host_telemetry();
+    if (host_mode == HOST_AP) {
+        host_send("CMD", "mode", "ap_mode");
+        if (*host_ap_ssid) host_send("RES", "apSsid", host_ap_ssid);
+    } else if (host_mode == HOST_UP || (host_mode == HOST_BOOT && host_age() >= 600)) host_telemetry();
 }
 
 static void host_set(host_mode_t mode) {
@@ -475,6 +479,8 @@ int main(int argc, char **argv) {
             host_hashes = arg[8] == 'n';
         } else if (!strncmp(arg, "hostname:", 9)) {
             snprintf(host_hostname, sizeof(host_hostname), "%s", strcmp(arg + 9, "off") ? arg + 9 : "");
+        } else if (!strncmp(arg, "apssid:", 7)) {
+            snprintf(host_ap_ssid, sizeof(host_ap_ssid), "%s", strcmp(arg + 7, "off") ? arg + 7 : "");
         } else if (!strncmp(arg, "pool:", 5)) {
             snprintf(host_pool, sizeof(host_pool), "%s", arg + 5);
         } else if (!strcmp(arg, "netdiff:on") || !strcmp(arg, "netdiff:off")) {

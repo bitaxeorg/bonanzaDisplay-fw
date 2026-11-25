@@ -191,6 +191,21 @@ static void test_schedule_and_reconnect(uint32_t start) {
     assert(!c.connected && c.metrics.power_w == BONANZA_METRIC_UNKNOWN);
     assert(!strcmp(c.metrics.device_name, "Host WiFi AP"));
     assert(c.metrics.link == BONANZA_LINK_AP_MODE);
+    // Hosts that name their setup network: the name is kept while the host
+    // keeps repeating ap_mode, and it does not count as being connected.
+    assert(!*c.metrics.ap_ssid);
+    bonanza_metrics_t snapshot;
+    assert(bonanza_bap_client_take_update(&c, &snapshot));
+    receive(&c, "RES", "apSsid", "Bitaxe_A1B2", start + 74100);
+    assert(!c.connected && c.metrics.link == BONANZA_LINK_AP_MODE);
+    assert(bonanza_bap_client_take_update(&c, &snapshot) && !strcmp(snapshot.ap_ssid, "Bitaxe_A1B2"));
+    receive(&c, "CMD", "mode", "ap_mode", start + 74500);
+    assert(!strcmp(c.metrics.ap_ssid, "Bitaxe_A1B2") && c.metrics.link == BONANZA_LINK_AP_MODE);
+    receive(&c, "RES", "apSsid", "A name of more than thirty-two characters", start + 74600);
+    assert(strlen(c.metrics.ap_ssid) == 32 && !c.connected);
+    receive(&c, "STA", "status", "restarting", start + 74700);
+    assert(!*c.metrics.ap_ssid && c.metrics.link == BONANZA_LINK_RESTARTING);
+    receive(&c, "CMD", "mode", "ap_mode", start + 74800);
     receive(&c, "RES", "hashrate", "90000", start + 75000);
     assert(c.connected);
     bonanza_bap_client_next_message(&c, start + 105000, frame, sizeof(frame));

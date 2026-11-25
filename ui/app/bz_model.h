@@ -63,6 +63,7 @@ typedef struct {
     bz_link_t link;
     char family[32];
     char hostname[33];  // The host's network name, if it reports one
+    char ap_ssid[33];   // Name of the host's WiFi setup network, if it reports one
     char asic[16];
     char ip[16];
     char best_diff[32];

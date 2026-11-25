@@ -12,6 +12,7 @@ Checked against `ESP-miner-bonanza` branch `bonanza-display-support` at
 | Field on the wire | Display shows it as | Fallback until the host sends it |
 | --- | --- | --- |
 | `hostname` | Name on the `HERO` device line | Device family, e.g. `BONANZA` |
+| `apSsid` | Network name and join code on the WiFi setup screen | The pattern `Bitaxe_XXXX`, and a code that opens `http://192.168.4.1` instead of joining |
 | `networkDifficulty` | Globe line on `HERO`; `NETWORK DIFF` metric | `--` |
 | `frequency` (optional) | `FREQUENCY` metric | `-- MHz` |
 | `networkTarget` | `TARGET` row on the `TARGET` page | Worked out from `networkDifficulty`; first 4 digits, then dots |
@@ -46,6 +47,44 @@ Notes:
 - `nvs_config.h` is already included by `bap_handlers.c`.
 - The display limits are 15 characters for the difficulty and 32 for the host
   name; longer values are cut.
+
+## The change: setup network name
+
+When the host has no WiFi, the display shows a screen with a QR code. To make
+a code that joins the host's setup network it needs that network's name,
+which is different on every Bitaxe (`Bitaxe_` and the last four digits of the
+MAC address). The host has it in `SYSTEM_MODULE.ap_ssid`, set in
+`wifi_init_softap()` in `components/connect/connect.c`, and already draws the
+same code on its own screen (`create_screen_with_qr()` in `main/screen.c`).
+
+In AP mode the host refuses requests and subscriptions, so the name has to be
+pushed. `BAP_send_ap_message()` in `main/bap/bap_uart.c` already runs every
+five seconds while there is no WiFi; one more line there does it:
+
+```c
+void BAP_send_ap_message(GlobalState *state) {
+    BAP_send_message(BAP_CMD_CMD, "mode", "ap_mode");
+    BAP_send_message(BAP_CMD_RES, "apSsid", state->SYSTEM_MODULE.ap_ssid);
+}
+```
+
+Notes:
+
+- The display keeps the name across the repeated `ap_mode` messages and does
+  not treat this `RES` as the host being connected, so the order of the two
+  lines does not matter.
+- The display assumes the setup network is open and its page is at
+  `192.168.4.1`, as both are today. If either changes, the display needs to be
+  told.
+- `ap_mode` is sent whenever `is_connected` is false, including the first few
+  seconds of a normal start and the retries after WiFi drops, when the setup
+  network may be off (`ap_enabled` false). The display waits ten seconds
+  before showing its screen, which covers the start. Sending `apSsid` only
+  while `ap_enabled` is true would cover the rest: without a name the display
+  shows a link code, not a join code.
+- A name the display could also use, but does not need: the network the host
+  is failing to join (`SYSTEM_MODULE.ssid`) and why (`wifi_status`). Neither
+  is read today.
 
 ## Optional: frequency
 
@@ -116,9 +155,17 @@ Where the host has each value today, for the BZM chips on Bonanza:
 - **`asicHashrate`**: `HASHRATE_MONITOR_MODULE.domain_measurements[i][0].hashrate`,
   which the web API already reports per chip (`main/http_server/system_api_json.c`).
   BZM has `hash_domains = 1`, so this is a whole chip.
-- **`domainHashrate`**: there is no per-domain rate yet.
-  `BZM_frequency_domain_stats_snapshot()` counts valid and rejected results per
-  chip and stack, which a rate could be worked out from.
+- **`domainHashrate`**: there is no per-domain rate yet, and the chip has no
+  per-domain hash counter to read (the BM13xx chips do; BZM hashrate is
+  counted from results). The pieces are there, though: every result carries
+  its engine number, and `BZM_record_local_result()` in
+  `components/asic/bzm_driver.c` already counts valid results per chip and
+  stack (`BZM_frequency_domain_stats_snapshot()`). A rate is
+  `valid results x 2^CONFIG_BZM_1002_LEAD_ZEROS / seconds`. With the default
+  of 36 leading zeros a stack at 375 GH/s gives about 5.5 results a second, so
+  average over a minute or so for a steady number (about +/-5%); ten seconds
+  is about +/-13%. Per-engine rates (236 engines a chip) are possible the same
+  way but see a result only every 20 seconds or so each.
 
 One thing to settle first: this source describes a BZM chip as two engine
 stacks with two PLLs (`BZM_ENGINE_STACK_COUNT = 2`, `BZM_BRINGUP_PLL_COUNT 2`),
@@ -133,8 +180,8 @@ from the host.
    reply.
 3. To preview the result without a host, the simulator's pretend host already
    sends all of these (`tools/sim.sh`; `hostname:off`, `netdiff:off`,
-   `hashes:off` and `asics:off` turn them off, and `asics:4x2` sets the chip
-   and domain counts).
+   `hashes:off`, `asics:off` and `apssid:off` turn them off, and `asics:4x2`
+   sets the chip and domain counts).
 
 ## Open question
 
